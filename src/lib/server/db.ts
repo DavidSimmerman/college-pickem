@@ -4,7 +4,9 @@ import { mkdirSync } from 'node:fs';
 
 mkdirSync('data', { recursive: true });
 export const db = new DatabaseSync('data/pickem.db');
-db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
+// busy_timeout matters: the background scraper writes while requests do, and
+// without it a concurrent write fails outright instead of waiting its turn.
+db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS players (

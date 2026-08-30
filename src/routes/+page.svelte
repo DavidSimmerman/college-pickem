@@ -112,12 +112,14 @@
 				<div class="grid grid-cols-2 gap-1.5">
 					{#each ['away', 'home'] as const as side}
 						{@const t = { abbr: g[`${side}_abbr`], name: g[`${side}_name`], logo: g[`${side}_logo`], rank: g[`${side}_rank`], score: g[`${side}_score`] }}
-						{@const odds = side === 'home' ? g.ml_home : g.ml_away}
+						{@const live = side === 'home' ? g.ml_home : g.ml_away}
+						<!-- once picked, show the price that was locked in, not the drifted line -->
+						{@const odds = picked === side && g.ml_odds_at != null ? g.ml_odds_at : live}
 						{@const on = picked === side}
 						{@const res = on && done ? outcome(g, mode) : null}
 						<button
 							onclick={() => pick(g, side)}
-							disabled={g.locked || (mode === 'ml' ? odds === null : g.spread === null)}
+							disabled={g.locked || (mode === 'ml' ? live === null : g.spread === null)}
 							aria-pressed={on}
 							aria-label="{mode === 'spread' ? 'Spread' : 'Moneyline'} pick {t.name}"
 							class="relative rounded-lg border p-2 text-left transition-all disabled:cursor-not-allowed

@@ -1,6 +1,13 @@
 // End-to-end check against the running dev server.
 // Run: node e2e.mjs      (uses the mockup-sandbox playwright install)
-import { chromium } from '/home/claude/dev/mockup-sandbox/node_modules/playwright/index.mjs';
+// Playwright is not a dependency of this project (it drags in ~300MB of browsers).
+// Use it from wherever it is already installed; `pnpm add -D playwright` also works.
+const { chromium } = await import('playwright').catch(() =>
+	import('/home/claude/dev/mockup-sandbox/node_modules/playwright/index.mjs').catch(() => {
+		console.error('e2e needs playwright: pnpm add -D playwright && npx playwright install chromium');
+		process.exit(1);
+	})
+);
 import { DatabaseSync } from 'node:sqlite';
 import assert from 'node:assert/strict';
 

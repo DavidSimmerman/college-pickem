@@ -1,11 +1,20 @@
 import adapter from '@sveltejs/adapter-auto';
 import { sveltekit } from '@sveltejs/kit/vite';
 import tailwindcss from '@tailwindcss/vite';
-import { sandboxServer } from '/home/claude/sandbox/vite/vite.sandbox.preset';
 import { defineConfig } from 'vite';
 
+const PORT = 5192;
+
 export default defineConfig({
-	server: sandboxServer(5192),
+	// Inlined rather than imported from the sandbox preset: an out-of-project import
+	// loads a second copy of @sveltejs/kit, which breaks redirects. Works anywhere.
+	server: {
+		port: PORT,
+		host: true,
+		allowedHosts: true,
+		// so HMR survives being served through an https tunnel
+		hmr: { protocol: 'wss', clientPort: 443 }
+	},
 	plugins: [
 		tailwindcss(),
 		sveltekit({
@@ -14,10 +23,6 @@ export default defineConfig({
 				runes: ({ filename }) =>
 					filename.split(/[/\\]/).includes('node_modules') ? undefined : true
 			},
-
-			// adapter-auto only supports some environments, see https://svelte.dev/docs/kit/adapter-auto for a list.
-			// If your environment is not supported, or you settled on a specific environment, switch out the adapter.
-			// See https://svelte.dev/docs/kit/adapters for more information about adapters.
 			adapter: adapter()
 		})
 	]

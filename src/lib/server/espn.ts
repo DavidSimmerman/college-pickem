@@ -98,14 +98,28 @@ export function gamesLive(): boolean {
 	return r.n > 0;
 }
 
-let timer: NodeJS.Timeout | null = null;
+/** Seconds until the next kickoff, or null if nothing is scheduled. */
+export function secondsToNextKickoff(): number | null {
+	const r = db
+		.prepare(
+			`SELECT CAST((julianday(MIN(datetime(start))) - julianday('now')) * 86400 AS INTEGER) AS s
+       FROM games WHERE state = 'pre' AND datetime(start) > datetime('now')`
+		)
+		.get() as { s: number | null };
+	return r?.s ?? null;
+}
+
+// Module state resets on every dev-server reload but the process does not, so the
+// live timer is parked on globalThis: adopt-and-replace instead of stacking pollers.
+const RUNNING = Symbol.for('cfb-pickem.scraper');
+const g = globalThis as any;
 
 /**
  * Self-scheduling poller: every 5 min while anything is live, hourly otherwise.
  * ponytail: a setTimeout in the server process, not a systemd timer or a cron dep.
  */
 export function startScraper() {
-	if (timer) return;
+	if (g[RUNNING]) clearTimeout(g[RUNNING]); // drop the previous module's poller
 	const tick = async () => {
 		try {
 			const r = await scrapeWeek();
@@ -113,9 +127,13 @@ export function startScraper() {
 		} catch (err) {
 			console.error('[espn] scrape failed:', (err as Error).message); // keep polling; transient
 		}
-		const live = gamesLive();
-		timer = setTimeout(tick, (live ? 5 : 60) * 60_000);
-		(timer as any).unref?.();
+		// 5 min while anything is live, hourly otherwise — but never sleep past the
+		// next kickoff, or we would freeze a line up to an hour stale as the closing one.
+		let mins = gamesLive() ? 5 : 60;
+		const toKick = secondsToNextKickoff();
+		if (toKick !== null) mins = Math.min(mins, Math.max(1, (toKick - 10 * 60) / 60));
+		g[RUNNING] = setTimeout(tick, mins * 60_000);
+		g[RUNNING].unref?.();
 	};
 	tick();
 }
