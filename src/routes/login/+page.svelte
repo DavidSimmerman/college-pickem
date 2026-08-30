@@ -29,7 +29,7 @@
 		</button>
 	</form>
 	<p class="mt-4 text-[11px] leading-relaxed text-neutral-600">
-		Spread picks are straight win/loss. Moneyline picks pay the odds — a +350 dog earns 3.50,
-		a -400 favorite that loses costs you 4.00.
+		Spread picks are straight win/loss. Moneyline picks pay the odds and cost one point when
+		they miss — a +350 dog earns 3.50, a -400 favorite earns only 0.25. Chasing chalk bleeds you.
 	</p>
 </div>

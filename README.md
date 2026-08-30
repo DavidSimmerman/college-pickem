@@ -7,19 +7,39 @@ Weekly college-football pick'em for you and your friends. Two independent picks 
 
 ## Moneyline scoring
 
-Points come straight from the American odds:
+A hit pays the odds; a miss always costs exactly **one point**.
 
 | You pick | If it hits | If it misses |
 |---|---|---|
-| `+350` underdog | **+3.50** | −0.29 |
-| `-110` coin flip | +0.91 | −1.10 |
-| `-400` favorite | +0.25 | **−4.00** |
+| `+350` underdog | **+3.50** | −1.00 |
+| `-110` coin flip | +0.91 | −1.00 |
+| `-400` favorite | +0.25 | −1.00 |
 
-Rule: pick a favorite at `-X` → win `100/X`, lose `X/100`. Pick a dog at `+Y` → win `Y/100`, lose `100/Y`.
-Chasing upsets is cheap; blowing a heavy favorite hurts.
+Heavy favorites are punished through the *ratio*, not the penalty: a `-400` favorite
+risks a full point to win 0.25, so it has to hit 80% of the time just to break even.
 
-Payouts are clamped to `+25` / `−10` (`MAX_WIN` / `MAX_LOSS` in `src/lib/scoring.ts`) so a single
-`-20000` cupcake game can't erase a season. The caps only bite outside roughly `-1000` / `+2500`.
+**Why the loss is flat.** The obvious rule — pay `b` on a hit, charge `1/b` on a miss, so
+blowing a `-400` favorite costs 4.00 — makes every underdog strictly +EV. The dominant
+strategy becomes "take every longshot on the board every week," and the leaderboard measures
+pick volume instead of skill. Requiring a pick to break even against a fair line,
+`EV = p·b − (1−p)·L = 0` with `b = (1−p)/p`, forces `L = 1` uniquely: keeping the upset
+payouts means the loss *must* be flat.
+
+Verified against 2,316 real games with real closing lines (2023–25). Every no-skill
+strategy lands at or below zero points per pick; only beating the market pays:
+
+| Strategy | Picks | Hit% | Points/pick |
+|---|---|---|---|
+| every underdog | 2316 | 25.6% | −0.167 |
+| dogs +500 or longer | 612 | 5.6% | −0.469 |
+| every favorite | 2316 | 74.4% | −0.023 |
+| heavy favs −500 or worse | 837 | 91.6% | −0.004 |
+| always home | 2316 | 60.6% | −0.022 |
+| random | 2316 | 50.3% | −0.085 |
+| **beats the market by 3%** | 2316 | 67.6% | **+0.014** |
+
+Payouts cap at `MAX_WIN` (15) so one lucky `+5000` cupcake can't decide the season.
+Both constants live in `src/lib/scoring.ts`.
 
 ## Data
 

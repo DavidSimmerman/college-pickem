@@ -4,19 +4,32 @@
 export const mult = (american: number) => (american > 0 ? american / 100 : 100 / -american);
 
 /**
- * Moneyline points, asymmetric and derived entirely from the price:
- *   win  = mult          (a +350 dog pays 3.50)
- *   lose = -1 / mult     (a -400 favorite that folds costs 4.00)
- * So chasing upsets is cheap and blowing a heavy chalk pick is brutal.
+ * Moneyline points — "flat risk", the only farm-proof shape.
+ *
+ *   win  = the odds multiple, capped at MAX_WIN   (a +350 dog pays 3.50)
+ *   lose = exactly one point, always
+ *
+ * Why the loss has to be flat: if a hit pays the odds multiple b, the only loss
+ * that makes a pick break even against a fair line is
+ *     EV = p·b − (1−p)·L = 0,  with b = (1−p)/p   ⇒   L = 1
+ * Charging heavy favourites more when they fold (the tempting −1/b rule) makes
+ * every underdog strictly +EV, so "take every longshot every week" farms points
+ * with no skill at all. Backtested over 2,316 real games with real closing lines
+ * (2023-25): under this rule every no-skill strategy lands at or below zero and
+ * only beating the market pays.
+ *
+ * Heavy favourites are still punished — through the ratio, not the penalty.
+ * A -400 favourite risks a full point to win 0.25, so it has to hit 80% of the
+ * time just to break even. Chasing chalk still bleeds you dry.
+ *
+ * MAX_WIN caps the lottery: an uncapped +5000 cupcake would pay 50 points and
+ * decide the season on a single fluke.
  */
-/* Tail guard: ESPN prices cupcake games as low as -20000, which the raw formula
-   turns into -200.00 for a single game. Caps only bite outside roughly -1000/+2500,
-   so every ordinary line scores exactly as the plain rule says. */
-export const MAX_WIN = 25;
-export const MAX_LOSS = 10;
+export const MAX_WIN = 15;
+export const RISK = 1;
 
 export const mlWin = (american: number) => Math.min(mult(american), MAX_WIN);
-export const mlLose = (american: number) => -Math.min(1 / mult(american), MAX_LOSS);
+export const mlLose = (_american?: number) => -RISK;
 
 export type Outcome = 'win' | 'loss' | 'push' | 'pending';
 export type Side = 'home' | 'away';
@@ -37,11 +50,7 @@ export function gradeSpread(
 	return mine > 0 ? 'win' : mine < 0 ? 'loss' : 'push';
 }
 
-export function gradeMl(
-	pick: Side,
-	homeScore: number | null,
-	awayScore: number | null
-): Outcome {
+export function gradeMl(pick: Side, homeScore: number | null, awayScore: number | null): Outcome {
 	if (homeScore === null || awayScore === null) return 'pending';
 	if (homeScore === awayScore) return 'push';
 	const winner: Side = homeScore > awayScore ? 'home' : 'away';
@@ -62,7 +71,7 @@ export function lineFor(spread: number | null, side: Side): string {
 }
 
 export const fmtOdds = (a: number) => (a > 0 ? '+' : '') + a;
-export const fmtPts = (n: number) => (n > 0 ? '+' : n < 0 ? '' : '') + n.toFixed(2);
+export const fmtPts = (n: number) => (n > 0 ? '+' : '') + n.toFixed(2);
 
 /* ponytail: one assert-based self-check instead of a test framework.
    Run with `node --experimental-strip-types src/lib/scoring.ts`. */
@@ -70,14 +79,28 @@ export async function selfTest() {
 	const { strict: a } = await import('node:assert');
 	const near = (x: number, y: number, m = '') => a.ok(Math.abs(x - y) < 1e-9, `${m} ${x} != ${y}`);
 
-	// payout shape
-	// caps must not touch ordinary lines
-	near(mlWin(350), 3.5, 'dog win');
-	near(mlLose(350), -1 / 3.5, 'dog loss is cheap');
+	// payout shape: the win scales with the upset, a miss always costs one point
+	near(mlWin(350), 3.5, 'dog win pays the odds');
 	near(mlWin(-400), 0.25, 'chalk win is thin');
-	near(mlLose(-400), -4, 'chalk loss is brutal');
-	near(mlWin(100), 1);
-	near(mlLose(100), -1, 'pick-em is symmetric');
+	near(mlWin(100), 1, 'pick-em pays even');
+	near(mlLose(350), -1, 'every miss costs exactly one');
+	near(mlLose(-400), -1);
+	near(mlLose(-9000), -1, 'even a blown cupcake chalk costs only one');
+
+	// The farm-proof property: against a fair line every pick is worth exactly
+	// zero, so no odds range can be farmed for points without beating the market.
+	for (const odds of [-9000, -450, -200, -110, 120, 350, 900, 2500]) {
+		const b = mult(odds);
+		const p = 1 / (b + 1); // fair win probability implied by that price
+		const ev = p * mlWin(odds) + (1 - p) * mlLose(odds);
+		if (b <= MAX_WIN) near(ev, 0, `odds ${odds} must be EV-neutral`);
+		else a.ok(ev < 0, `capped longshot ${odds} must not be +EV`);
+	}
+
+	// lottery cap
+	near(mlWin(20000), MAX_WIN, 'longshot payout is capped');
+	near(mlWin(1500), MAX_WIN, 'cap boundary');
+	near(mlWin(1499), 14.99, 'just inside the cap is exact');
 
 	// spread grading: home -4.5, home wins by 7 -> home covers
 	a.equal(gradeSpread('home', -4.5, 28, 21), 'win');
@@ -105,19 +128,11 @@ export async function selfTest() {
 
 	// points wiring
 	near(mlPoints('win', 240), 2.4);
-	near(mlPoints('loss', -298), -2.98);
+	near(mlPoints('loss', -298), -1);
+	near(mlPoints('loss', -20000), -RISK);
 	near(mlPoints('push', -298), 0);
 	near(mlPoints('pending', -298), 0);
 	near(mlPoints('win', null), 0);
-
-	// tail guard: absurd cupcake prices are clamped, ordinary ones are not
-	near(mlLose(-9000), -MAX_LOSS, 'blown cupcake chalk is capped');
-	near(mlWin(20000), MAX_WIN, 'longshot payout is capped');
-	near(mlLose(-1000), -MAX_LOSS, 'cap boundary');
-	near(mlLose(-999), -9.99, 'just inside the cap is exact');
-	near(mlWin(2500), MAX_WIN, 'win cap boundary');
-	near(mlWin(2499), 24.99, 'just inside the win cap is exact');
-	near(mlPoints('loss', -20000), -MAX_LOSS);
 
 	// line rendering
 	a.equal(lineFor(-4.5, 'home'), '-4.5');

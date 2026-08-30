@@ -41,9 +41,7 @@
 	const atRisk = $derived(
 		mlPicks.reduce((t: number, g: any) => t + mlWin(g.ml_odds_at ?? 0), 0)
 	);
-	const downside = $derived(
-		mlPicks.reduce((t: number, g: any) => t + mlLose(g.ml_odds_at ?? 0), 0)
-	);
+	const downside = $derived(mlPicks.length * mlLose());
 
 	const outcome = (g: any, kind: 'spread' | 'ml') =>
 		kind === 'spread'
@@ -149,7 +147,7 @@
 									<div class="text-right leading-none">
 										<div class="font-mono text-[13px] {on ? 'font-bold text-amber-400' : 'text-neutral-500'}">{fmtOdds(odds)}</div>
 										<div class="mt-0.5 font-mono text-[10px]">
-											<span class="text-emerald-500">+{mlWin(odds).toFixed(2)}</span><span class="text-neutral-700">/</span><span class="text-red-500">{mlLose(odds).toFixed(2)}</span>
+											<span class="text-emerald-500">+{mlWin(odds).toFixed(2)}</span><span class="text-neutral-700"> / </span><span class="text-red-500">-1.00</span>
 										</div>
 									</div>
 								{:else}
