@@ -7,7 +7,7 @@
 // the passcode form keeps working exactly as before.
 
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import type { DatabaseSync } from 'node:sqlite';
+import { one, run } from './db.ts';
 
 const AUTH = 'https://accounts.google.com/o/oauth2/v2/auth';
 const TOKEN = 'https://oauth2.googleapis.com/token';
@@ -98,25 +98,22 @@ export function decodeIdToken(jwt: string): Profile {
  * an existing passcode account ever gains a Google login: matching on name or email
  * would let anyone who picks the right display name walk into someone else's season.
  */
-export function resolveAccount(
-	dbh: DatabaseSync,
+export async function resolveAccount(
 	profile: Profile,
 	linkTo: number | null,
 	freshPass: () => string
-): { id: number } | { error: string } {
+): Promise<{ id: number } | { error: string }> {
 	const { sub, email, name } = profile;
-	const existing = dbh.prepare('SELECT id FROM players WHERE google_sub = ?').get(sub) as
-		| { id: number }
-		| undefined;
+	const existing = await one<{ id: number }>('SELECT id FROM players WHERE google_sub = ?', sub);
 
 	if (linkTo !== null) {
 		if (existing && existing.id !== linkTo) return { error: 'That Google account is already linked to another player.' };
-		dbh.prepare('UPDATE players SET google_sub = ?, email = ? WHERE id = ?').run(sub, email, linkTo);
+		await run('UPDATE players SET google_sub = ?, email = ? WHERE id = ?', sub, email, linkTo);
 		return { id: linkTo };
 	}
 
 	if (existing) {
-		if (email) dbh.prepare('UPDATE players SET email = ? WHERE id = ?').run(email, existing.id);
+		if (email) await run('UPDATE players SET email = ? WHERE id = ?', email, existing.id);
 		return { id: existing.id };
 	}
 
@@ -125,11 +122,12 @@ export function resolveAccount(
 	// picks, and the owner can connect Google properly in one click from My Picks.
 	const wanted = (name ?? email?.split('@')[0] ?? 'Player').trim().slice(0, 24);
 	if (wanted.length < 2) return { error: 'Google gave us no usable name. Create an account with a passcode instead.' };
-	if (dbh.prepare('SELECT 1 FROM players WHERE name = ?').get(wanted))
+	if (await one('SELECT 1 FROM players WHERE lower(name) = lower(?)', wanted))
 		return { error: `An account called ${wanted} already exists. Sign in with your passcode, then connect Google from My Picks.` };
 
-	const row = dbh
-		.prepare('INSERT INTO players (name, pass, google_sub, email) VALUES (?,?,?,?) RETURNING id')
-		.get(wanted, freshPass(), sub, email) as { id: number };
-	return { id: Number(row.id) };
+	const row = await one<{ id: number }>(
+		'INSERT INTO players (name, pass, google_sub, email) VALUES (?,?,?,?) RETURNING id',
+		wanted, freshPass(), sub, email
+	);
+	return { id: Number(row!.id) };
 }

@@ -1,5 +1,5 @@
 import { redirect } from '@sveltejs/kit';
-import { db, createSession, hashPass } from '$lib/server/db';
+import { createSession, hashPass } from '$lib/server/db';
 import { configured, exchange, resolveAccount, stateMatches } from '$lib/server/google';
 import { randomBytes } from 'node:crypto';
 import type { RequestHandler } from './$types';
@@ -33,12 +33,12 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 
 	// A Google-made account gets an unguessable passcode, so the password form can never
 	// match it — there is no password to leak or to reset into.
-	const out = resolveAccount(db, profile, link ? Number(link) : null, () =>
+	const out = await resolveAccount(profile, link ? Number(link) : null, () =>
 		hashPass(randomBytes(32).toString('hex'))
 	);
 	if ('error' in out) back(out.error);
 
-	cookies.set('sid', createSession(out.id), {
+	cookies.set('sid', await createSession(out.id), {
 		path: '/', httpOnly: true, sameSite: 'lax',
 		secure: url.protocol === 'https:',
 		maxAge: 60 * 60 * 24 * 180

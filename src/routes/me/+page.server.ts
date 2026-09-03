@@ -1,5 +1,5 @@
 import { redirect } from '@sveltejs/kit';
-import { db } from '$lib/server/db';
+import { all, one } from '$lib/server/db';
 import { gradeSpread, gradeMl, mlPoints, type Side, type Outcome } from '$lib/scoring';
 import { configured } from '$lib/server/google';
 import type { PageServerLoad } from './$types';
@@ -20,7 +20,7 @@ type Row = {
 	week: number;
 	spread: number | null;
 	state: string;
-	start: string;
+	start: string | Date;
 	home_score: number | null;
 	away_score: number | null;
 	home_abbr: string; away_abbr: string;
@@ -53,43 +53,41 @@ function tallies(rows: Row[], slateRows: SlateRow[]) {
 const GAME_COLS = `g.week, g.spread, g.state, g.start, g.home_score, g.away_score,
    g.home_abbr, g.away_abbr, g.home_name, g.away_name, g.home_logo, g.away_logo`;
 
-export const load: PageServerLoad = ({ locals, url }) => {
+export const load: PageServerLoad = async ({ locals, url }) => {
 	if (!locals.player) redirect(303, '/login');
 	const me = locals.player.id;
 
-	const latest = db
-		.prepare('SELECT season, week FROM games ORDER BY season DESC, week DESC LIMIT 1')
-		.get() as { season: number; week: number } | undefined;
+	const latest = await one<{ season: number; week: number }>(
+		'SELECT season, week FROM games ORDER BY season DESC, week DESC LIMIT 1');
 	const season = Number(url.searchParams.get('season')) || latest?.season || new Date().getFullYear();
 	const week = Number(url.searchParams.get('week')) || latest?.week || 1;
 
 	const picksFor = (w: number | null) =>
-		db
-			.prepare(
-				`SELECT pk.kind, pk.side, pk.spread_at, pk.odds_at, ${GAME_COLS}
+		all<Row>(
+			`SELECT pk.kind, pk.side, pk.spread_at, pk.odds_at, ${GAME_COLS}
          FROM picks pk JOIN games g ON g.id = pk.game_id
          WHERE pk.player_id = ? AND g.season = ?${w === null ? '' : ' AND g.week = ?'}
-         ORDER BY g.start, g.id`
-			)
-			.all(...(w === null ? [me, season] : [me, season, w])) as Row[];
+         ORDER BY g.start, g.id`,
+			...(w === null ? [me, season] : [me, season, w])
+		);
 
 	// Only a submitted board counts, here as everywhere else.
 	const slateFor = (w: number | null) =>
-		db
-			.prepare(
-				`SELECT sp.side, sp.odds_at, s.seed, ${GAME_COLS}
+		all<SlateRow>(
+			`SELECT sp.side, sp.odds_at, s.seed, ${GAME_COLS}
          FROM slate_picks sp
          JOIN games g ON g.id = sp.game_id
          JOIN slate s ON s.game_id = sp.game_id
          JOIN slate_submits sub
            ON sub.player_id = sp.player_id AND sub.season = s.season AND sub.week = s.week
          WHERE sp.player_id = ? AND s.season = ?${w === null ? '' : ' AND s.week = ?'}
-         ORDER BY s.week, s.seed`
-			)
-			.all(...(w === null ? [me, season] : [me, season, w])) as SlateRow[];
+         ORDER BY s.week, s.seed`,
+			...(w === null ? [me, season] : [me, season, w])
+		);
 
-	const weekPicks = picksFor(week);
-	const weekSlate = slateFor(week);
+	const [weekPicks, weekSlate, allPicks, allSlate] = await Promise.all([
+		picksFor(week), slateFor(week), picksFor(null), slateFor(null)
+	]);
 
 	// A pick the player can still see the shape of before it grades.
 	const shape = (r: Row | SlateRow, kind: string, seed?: number) => {
@@ -101,7 +99,9 @@ export const load: PageServerLoad = ({ locals, url }) => {
 				? gradeSpread(side, (r as Row).spread_at ?? r.spread, r.home_score, r.away_score)
 				: gradeMl(side, r.home_score, r.away_score);
 		return {
-			kind, seed, side, start: r.start, state: r.state,
+			kind, seed, side,
+			start: r.start instanceof Date ? r.start.toISOString() : r.start,
+			state: r.state,
 			team: side === 'home' ? r.home_name : r.away_name,
 			abbr: side === 'home' ? r.home_abbr : r.away_abbr,
 			logo: side === 'home' ? r.home_logo : r.away_logo,
@@ -119,23 +119,22 @@ export const load: PageServerLoad = ({ locals, url }) => {
 		};
 	};
 
-	const linked = !!(
-		db.prepare('SELECT google_sub FROM players WHERE id = ?').get(me) as { google_sub: string | null }
-	)?.google_sub;
+	const linked = !!(await one<{ google_sub: string | null }>(
+		'SELECT google_sub FROM players WHERE id = ?', me))?.google_sub;
 
 	return {
 		season,
 		week,
 		google: { available: configured(), linked },
-		weeks: (db.prepare('SELECT DISTINCT week FROM games WHERE season = ? ORDER BY week').all(season) as {
-			week: number;
-		}[]).map((w) => w.week),
+		weeks: (
+			await all<{ week: number }>('SELECT DISTINCT week FROM games WHERE season = ? ORDER BY week', season)
+		).map((w) => w.week),
 		picks: [
 			...weekPicks.filter((r) => r.kind === 'spread').map((r) => shape(r, 'spread')),
 			...weekPicks.filter((r) => r.kind === 'ml').map((r) => shape(r, 'ml')),
 			...weekSlate.map((r) => shape(r, 'gotw', r.seed))
 		],
 		thisWeek: tallies(weekPicks, weekSlate),
-		season_: tallies(picksFor(null), slateFor(null))
+		season_: tallies(allPicks, allSlate)
 	};
 };

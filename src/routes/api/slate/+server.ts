@@ -1,5 +1,5 @@
 import { json, error } from '@sveltejs/kit';
-import { db } from '$lib/server/db';
+import { one, run } from '$lib/server/db';
 import { getSlate } from '$lib/server/slate';
 import type { RequestHandler } from './$types';
 
@@ -14,7 +14,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const week = Number(body.week);
 	if (!Number.isInteger(season) || !Number.isInteger(week)) error(400, 'bad week');
 
-	const card = getSlate(locals.player.id, season, week);
+	const card = await getSlate(locals.player.id, season, week);
 	if (!card.frozen) error(409, "this week's games are not set yet");
 	if (card.submitted) error(409, 'already submitted');
 	if (!card.open) error(409, 'this card is closed');
@@ -24,9 +24,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		// got to it is gone, and holding the whole card hostage to it helps nobody.
 		if (card.openLeft > 0)
 			error(409, `pick the ${card.openLeft} game${card.openLeft === 1 ? '' : 's'} that ${card.openLeft === 1 ? 'has' : 'have'} not kicked off yet`);
-		db.prepare('INSERT INTO slate_submits (player_id, season, week) VALUES (?,?,?)').run(
-			locals.player.id, season, week
-		);
+		await run('INSERT INTO slate_submits (player_id, season, week) VALUES (?,?,?)',
+			locals.player.id, season, week);
 		return json({ ok: true, submitted: true });
 	}
 
@@ -34,15 +33,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	if (typeof gameId !== 'string' || !gameId) error(400, 'bad gameId');
 	if (side !== 'home' && side !== 'away') error(400, 'bad side');
 	// A game can only be picked if it is on this week's card.
-	const g = db
-		.prepare(
-			`SELECT g.ml_home, g.ml_away, g.state, datetime(g.start) <= datetime('now') AS started
+	const g = await one<{
+		ml_home: number | null; ml_away: number | null; state: string; started: boolean;
+	}>(
+		`SELECT g.ml_home, g.ml_away, g.state, g.start <= now() AS started
        FROM slate s JOIN games g ON g.id = s.game_id
-       WHERE s.season = ? AND s.week = ? AND s.game_id = ?`
-		)
-		.get(season, week, gameId) as
-		| { ml_home: number | null; ml_away: number | null; state: string; started: number }
-		| undefined;
+       WHERE s.season = ? AND s.week = ? AND s.game_id = ?`,
+		season, week, gameId
+	);
 	if (!g) error(404, 'that game is not on this week\'s board');
 	if (g.state !== 'pre' || g.started) error(409, 'game has started');
 
@@ -50,12 +48,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	// the Week is win/loss, so this never feeds a score.
 	const price = side === 'home' ? g.ml_home : g.ml_away;
 
-	db.prepare(
+	await run(
 		`INSERT INTO slate_picks (player_id, game_id, side, odds_at) VALUES (?,?,?,?)
-     ON CONFLICT(player_id, game_id) DO UPDATE SET
-       side = excluded.side, odds_at = excluded.odds_at, created_at = datetime('now')`
-	).run(locals.player.id, gameId, side, price);
+     ON CONFLICT (player_id, game_id) DO UPDATE SET
+       side = excluded.side, odds_at = excluded.odds_at, created_at = now()`,
+		locals.player.id, gameId, side, price
+	);
 
-	const after = getSlate(locals.player.id, season, week);
+	const after = await getSlate(locals.player.id, season, week);
 	return json({ ok: true, side, filled: after.filled, size: after.size });
 };

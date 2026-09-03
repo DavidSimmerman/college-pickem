@@ -1,5 +1,5 @@
-import { db } from './db';
-import { dominantColor, visibleFraction } from './logo-color';
+import { all, one, run, migrate } from './db.ts';
+import { dominantColor, visibleFraction } from './logo-color.ts';
 import { hasHue, teamBg, teamTint } from '$lib/colors';
 
 // Share of a logo's solid pixels that must read against its background before we leave
@@ -37,12 +37,12 @@ export async function scrapeWeek(ref?: WeekRef): Promise<{ ref: WeekRef; games: 
 	const week: number = data?.week?.number ?? ref?.week ?? 1;
 	const events: any[] = Array.isArray(data?.events) ? data.events : [];
 
-	const upsert = db.prepare(`
+	const UPSERT = `
     INSERT INTO games (id, season, week, start, state, detail,
       home_abbr, home_name, home_logo, home_rank, home_score, home_conf, home_color, home_alt_color,
       away_abbr, away_name, away_logo, away_rank, away_score, away_conf, away_color, away_alt_color,
       spread, ml_home, ml_away, over_under, venue, tv, odds_frozen, updated_at)
-    VALUES (?,?,?,?,?,?, ?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?, datetime('now'))
+    VALUES (?,?,?,?,?,?, ?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?, now())
     ON CONFLICT(id) DO UPDATE SET
       start=excluded.start, state=excluded.state, detail=excluded.detail,
       home_rank=excluded.home_rank, home_score=excluded.home_score,
@@ -50,14 +50,15 @@ export async function scrapeWeek(ref?: WeekRef): Promise<{ ref: WeekRef; games: 
       home_conf=excluded.home_conf, away_conf=excluded.away_conf,
       home_color=excluded.home_color, away_color=excluded.away_color,
       home_alt_color=excluded.home_alt_color, away_alt_color=excluded.away_alt_color,
-      tv=excluded.tv, updated_at=datetime('now'),
+      tv=excluded.tv, updated_at=now(),
       -- only overwrite the price while the game has not started
-      spread     = CASE WHEN games.odds_frozen = 1 THEN games.spread     ELSE COALESCE(excluded.spread, games.spread) END,
-      ml_home    = CASE WHEN games.odds_frozen = 1 THEN games.ml_home    ELSE COALESCE(excluded.ml_home, games.ml_home) END,
-      ml_away    = CASE WHEN games.odds_frozen = 1 THEN games.ml_away    ELSE COALESCE(excluded.ml_away, games.ml_away) END,
-      over_under = CASE WHEN games.odds_frozen = 1 THEN games.over_under ELSE COALESCE(excluded.over_under, games.over_under) END,
-      odds_frozen = MAX(games.odds_frozen, excluded.odds_frozen)
-  `);
+      spread     = CASE WHEN games.odds_frozen THEN games.spread     ELSE COALESCE(excluded.spread, games.spread) END,
+      ml_home    = CASE WHEN games.odds_frozen THEN games.ml_home    ELSE COALESCE(excluded.ml_home, games.ml_home) END,
+      ml_away    = CASE WHEN games.odds_frozen THEN games.ml_away    ELSE COALESCE(excluded.ml_away, games.ml_away) END,
+      over_under = CASE WHEN games.odds_frozen THEN games.over_under ELSE COALESCE(excluded.over_under, games.over_under) END,
+      -- once frozen, always frozen: SQLite's MAX() over 0/1 is OR over booleans here
+      odds_frozen = games.odds_frozen OR excluded.odds_frozen
+  `;
 
 	let priced = 0;
 	for (const e of events) {
@@ -87,12 +88,13 @@ export async function scrapeWeek(ref?: WeekRef): Promise<{ ref: WeekRef; games: 
 			t.team?.alternateColor ? `#${t.team.alternateColor}` : null
 		];
 
-		upsert.run(
+		await run(
+			UPSERT,
 			String(e.id), season, week, String(e.date), state, c.status?.type?.shortDetail ?? null,
 			...team(home), ...team(away),
 			spread, mlH, mlA, num(o?.overUnder),
 			c.venue?.fullName ?? null, c.broadcasts?.[0]?.names?.[0] ?? null,
-			live ? 1 : 0
+			live
 		);
 	}
 	await backfillLogoColors();
@@ -106,27 +108,26 @@ export async function scrapeWeek(ref?: WeekRef): Promise<{ ref: WeekRef; games: 
  * ESPN derives a team's colour from its own logo. The logo itself is never recoloured.
  */
 async function backfillLogoColors(): Promise<void> {
-	const rows = db
-		.prepare(
-			`SELECT DISTINCT logo, color, alt FROM (
+	const rows = await all<{ logo: string; color: string | null; alt: string | null }>(
+		`SELECT DISTINCT logo, color, alt FROM (
          SELECT home_logo AS logo, home_color AS color, home_alt_color AS alt FROM games
-         UNION SELECT away_logo, away_color, away_alt_color FROM games)
+         UNION SELECT away_logo, away_color, away_alt_color FROM games) t
        WHERE logo IS NOT NULL`
-		)
-		.all() as { logo: string; color: string | null; alt: string | null }[];
+	);
 
 	const cached = new Map(
 		(
-			db.prepare('SELECT logo, color, bg FROM logo_colors').all() as {
-				logo: string;
-				color: string | null;
-				bg: string | null;
-			}[]
+			await all<{ logo: string; color: string | null; bg: string | null }>(
+				'SELECT logo, color, bg FROM logo_colors'
+			)
 		).map((r) => [r.logo, r])
 	);
-	const save = db.prepare(
-		'INSERT OR REPLACE INTO logo_colors (logo, color, bg, halo_on, halo_off) VALUES (?, ?, ?, ?, ?)'
-	);
+	// Postgres has no INSERT OR REPLACE; the primary key drives an upsert instead.
+	const SAVE = `INSERT INTO logo_colors (logo, color, bg, halo_on, halo_off) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (logo) DO UPDATE SET
+                  color = excluded.color, bg = excluded.bg,
+                  halo_on = excluded.halo_on, halo_off = excluded.halo_off,
+                  fetched_at = now()`;
 
 	let done = 0;
 	let haloed = 0;
@@ -142,7 +143,7 @@ async function backfillLogoColors(): Promise<void> {
 			const bg = teamBg(r.color, r.alt, derived);
 			const on = visibleFraction(png, bg) < HALO_BELOW;
 			const off = visibleFraction(png, teamTint(bg)) < HALO_BELOW;
-			save.run(r.logo, derived, bg, on ? 1 : 0, off ? 1 : 0);
+			await run(SAVE, r.logo, derived, bg, on, off);
 			done++;
 			if (on) haloed++;
 		} catch {
@@ -153,25 +154,21 @@ async function backfillLogoColors(): Promise<void> {
 }
 
 /** Any game currently in progress, or kicking off within the next 15 minutes. */
-export function gamesLive(): boolean {
-	const r = db
-		.prepare(
-			`SELECT COUNT(*) AS n FROM games
+export async function gamesLive(): Promise<boolean> {
+	const r = await one<{ n: number }>(
+		`SELECT COUNT(*) AS n FROM games
        WHERE state = 'in'
-          OR (state = 'pre' AND datetime(start) BETWEEN datetime('now') AND datetime('now','+15 minutes'))`
-		)
-		.get() as { n: number };
-	return r.n > 0;
+          OR (state = 'pre' AND start BETWEEN now() AND now() + interval '15 minutes')`
+	);
+	return (r?.n ?? 0) > 0;
 }
 
 /** Seconds until the next kickoff, or null if nothing is scheduled. */
-export function secondsToNextKickoff(): number | null {
-	const r = db
-		.prepare(
-			`SELECT CAST((julianday(MIN(datetime(start))) - julianday('now')) * 86400 AS INTEGER) AS s
-       FROM games WHERE state = 'pre' AND datetime(start) > datetime('now')`
-		)
-		.get() as { s: number | null };
+export async function secondsToNextKickoff(): Promise<number | null> {
+	const r = await one<{ s: number | null }>(
+		`SELECT CAST(EXTRACT(EPOCH FROM (MIN(start) - now())) AS INTEGER) AS s
+       FROM games WHERE state = 'pre' AND start > now()`
+	);
 	return r?.s ?? null;
 }
 
@@ -188,6 +185,7 @@ export function startScraper() {
 	if (g[RUNNING]) clearTimeout(g[RUNNING]); // drop the previous module's poller
 	const tick = async () => {
 		try {
+			await migrate(); // first thing the process does: make sure the schema is there
 			const r = await scrapeWeek();
 			console.log(`[espn] wk${r.ref.week} ${r.games} games, ${r.priced} priced`);
 		} catch (err) {
@@ -195,8 +193,8 @@ export function startScraper() {
 		}
 		// 5 min while anything is live, hourly otherwise — but never sleep past the
 		// next kickoff, or we would freeze a line up to an hour stale as the closing one.
-		let mins = gamesLive() ? 5 : 60;
-		const toKick = secondsToNextKickoff();
+		let mins = (await gamesLive()) ? 5 : 60;
+		const toKick = await secondsToNextKickoff();
 		if (toKick !== null) mins = Math.min(mins, Math.max(1, (toKick - 10 * 60) / 60));
 		g[RUNNING] = setTimeout(tick, mins * 60_000);
 		g[RUNNING].unref?.();

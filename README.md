@@ -1,67 +1,98 @@
 # CFB Pick'em
 
-Weekly college-football pick'em for you and your friends. Two independent picks per game:
+Weekly college-football pick'em for you and your friends. Three ways to play, scored
+independently, all off the same board.
 
-- **Spread** — straight win / loss / push against the line you locked in.
-- **Moneyline** — optional, and scored off the price so the payout scales with the upset.
+| Mode | What you pick | How it scores |
+|---|---|---|
+| **Games of the Week** | The winner of ten curated games, straight up | Win / loss. No points. |
+| **Spreads** | A side against the line you locked in | Win / loss / push |
+| **Moneyline** | A side at the price you locked in | Points, scaled to the odds |
+
+## Games of the Week
+
+Ten games a week, ranked, picked straight up. You have to pick every game that has not
+kicked off yet, then submit — an unsubmitted card counts for nothing.
+
+The ranking looks for what a Saturday show would: a close game between two teams worth
+watching, weighted toward the power conferences. Quality is carried mostly by the
+*weaker* side, so a top-five team against a cupcake never makes it. At least one pure
+mid-major game is guaranteed a spot, because the ranking would otherwise never reach
+one. Games with no line, or with one side so short it is a foregone conclusion, are left
+off entirely — they are not decisions.
+
+The board freezes once for the week and is never recomputed, so a line moving on Friday
+cannot reshuffle a card someone already filled in. Each game locks at its own kickoff:
+started games grey out, and you can still submit the rest.
 
 ## Moneyline scoring
 
-A hit pays the odds; a miss always costs exactly **one point**.
+A hit pays the odds; a miss always costs the same. Points are whole numbers.
 
 | You pick | If it hits | If it misses |
 |---|---|---|
-| `+350` underdog | **+3.50** | −1.00 |
-| `-110` coin flip | +0.91 | −1.00 |
-| `-400` favorite | +0.25 | −1.00 |
+| `+350` underdog | **+35** | −10 |
+| `-110` coin flip | +9 | −10 |
+| `-400` favorite | +3 | −10 |
 
 Heavy favorites are punished through the *ratio*, not the penalty: a `-400` favorite
-risks a full point to win 0.25, so it has to hit 80% of the time just to break even.
+risks 10 points to win 3, so it has to hit 80% of the time just to break even. A side
+priced so short that a correct pick pays nothing is not offered at all — it greys out,
+and the server refuses it.
 
-**Why the loss is flat.** The obvious rule — pay `b` on a hit, charge `1/b` on a miss, so
-blowing a `-400` favorite costs 4.00 — makes every underdog strictly +EV. The dominant
-strategy becomes "take every longshot on the board every week," and the leaderboard measures
-pick volume instead of skill. Requiring a pick to break even against a fair line,
-`EV = p·b − (1−p)·L = 0` with `b = (1−p)/p`, forces `L = 1` uniquely: keeping the upset
-payouts means the loss *must* be flat.
+Payouts cap at `MAX_WIN` so one lucky longshot cannot decide the season. Every constant
+lives in `src/lib/scoring.ts`, which also carries an assert-based self-test:
 
-Verified against 2,316 real games with real closing lines (2023–25). Every no-skill
-strategy lands at or below zero points per pick; only beating the market pays:
-
-| Strategy | Picks | Hit% | Points/pick |
-|---|---|---|---|
-| every underdog | 2316 | 25.6% | −0.167 |
-| dogs +500 or longer | 612 | 5.6% | −0.469 |
-| every favorite | 2316 | 74.4% | −0.023 |
-| heavy favs −500 or worse | 837 | 91.6% | −0.004 |
-| always home | 2316 | 60.6% | −0.022 |
-| random | 2316 | 50.3% | −0.085 |
-| **beats the market by 3%** | 2316 | 67.6% | **+0.014** |
-
-Payouts cap at `MAX_WIN` (15) so one lucky `+5000` cupcake can't decide the season.
-Both constants live in `src/lib/scoring.ts`.
+```sh
+node --experimental-strip-types src/lib/scoring.ts
+node --experimental-strip-types src/lib/slate.ts
+```
 
 ## Data
 
-Schedules, spreads, moneylines and final scores come from ESPN's public scoreboard endpoint —
-no API key. ESPN **drops the odds block the moment a game kicks off**, so the poller snapshots
-each line while the game is still scheduled and freezes it at kickoff; that frozen row is the
-closing line. Picks store the line *you* took, so a later line move never re-grades your pick.
+Schedules, spreads, moneylines and final scores come from ESPN's public scoreboard
+endpoint — no API key. ESPN **drops the odds block the moment a game kicks off**, so the
+poller snapshots each line while the game is still scheduled and freezes it at kickoff;
+that frozen row is the closing line. Picks store the line *you* took, so a later move
+never re-grades your pick.
 
-The poller self-schedules: every **5 minutes** while anything is live or about to kick, **hourly**
-otherwise. It runs inside the server process (`startScraper()` in `src/lib/server/espn.ts`) —
-no cron, no external scheduler.
+The poller self-schedules: every **5 minutes** while anything is live or about to kick,
+**hourly** otherwise, and never sleeps past the next kickoff. It runs inside the server
+process (`startScraper()` in `src/lib/server/espn.ts`) — no cron, no external scheduler.
 
-## Running
+Team colours come from ESPN too, which derives them from each school's logo — so a logo
+is often painted in exactly the colour it sits on. Every logo is measured once against
+the background it will be drawn on; the ones that would disappear get an ink outline
+rather than being recoloured. For the handful of schools ESPN files as flat black, the
+colour is read out of the logo itself by a small PNG decoder in
+`src/lib/server/logo-color.ts`.
+
+## Running locally
 
 ```sh
 pnpm install
-pnpm dev          # http://localhost:5192
-pnpm test         # scoring self-test + end-to-end browser checks
+createdb pickem                       # or point DATABASE_URL at any Postgres
+cp .env.example .env                  # then fill in DATABASE_URL
+pnpm dev                              # http://localhost:5192
 ```
 
-SQLite lives at `data/pickem.db` via Node's built-in `node:sqlite` — no database server, no ORM.
-Sign-in is a name plus a passcode (scrypt-hashed); an unknown name signs you up.
+The schema creates itself on first boot. Coming from the old SQLite build, import it:
 
-Picks lock at kickoff, enforced server-side in `src/routes/api/pick/+server.ts` — the client
-can't bypass it.
+```sh
+DATABASE_URL=postgres://... node --experimental-strip-types scripts/import-sqlite.ts data/pickem.db
+```
+
+That import is idempotent — running it twice changes nothing the second time.
+
+## Signing in
+
+A name plus a passcode (scrypt-hashed), or Google if the server has
+`GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` set. Without them the Google button never
+renders and nothing else changes.
+
+Google never merges into an existing account by name or email. To put both on one
+account, sign in with your passcode and use **Connect Google** on My Picks.
+
+## Deploying
+
+See [DEPLOY.md](DEPLOY.md) — Coolify, Postgres, and a Cloudflare tunnel.

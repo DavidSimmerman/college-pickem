@@ -1,5 +1,5 @@
 import { fail, redirect } from '@sveltejs/kit';
-import { db, hashPass, verifyPass, createSession } from '$lib/server/db';
+import { one, hashPass, verifyPass, createSession } from '$lib/server/db';
 import { configured } from '$lib/server/google';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -21,8 +21,8 @@ function check(name: string, pass: string) {
 	return null;
 }
 
-function signIn(cookies: Parameters<Actions[string]>[0]['cookies'], id: number, secure: boolean) {
-	cookies.set('sid', createSession(id), {
+async function signIn(cookies: Parameters<Actions[string]>[0]['cookies'], id: number, secure: boolean) {
+	cookies.set('sid', await createSession(id), {
 		path: '/', httpOnly: true, sameSite: 'lax', secure,
 		maxAge: 60 * 60 * 24 * 180
 	});
@@ -42,14 +42,13 @@ export const actions: Actions = {
 		const bad = check(name, pass);
 		if (bad) return fail(400, { mode: 'signin', name, msg: bad });
 
-		const player = db.prepare('SELECT id, pass FROM players WHERE name = ?').get(name) as
-			| { id: number; pass: string }
-			| undefined;
+		const player = await one<{ id: number; pass: string }>(
+			'SELECT id, pass FROM players WHERE lower(name) = lower(?)', name);
 		if (!player) return fail(400, { mode: 'signin', name, msg: `No player called ${name}. Create an account instead?` });
 		if (!verifyPass(pass, player.pass))
 			return fail(400, { mode: 'signin', name, msg: 'Wrong passcode for that name.' });
 
-		signIn(cookies, player.id, url.protocol === 'https:');
+		await signIn(cookies, player.id, url.protocol === 'https:');
 		redirect(303, '/');
 	},
 
@@ -62,13 +61,12 @@ export const actions: Actions = {
 		if (bad) return fail(400, { mode: 'signup', name, msg: bad });
 		if (pass !== again) return fail(400, { mode: 'signup', name, msg: 'The two passcodes do not match.' });
 
-		if (db.prepare('SELECT 1 FROM players WHERE name = ?').get(name))
+		if (await one('SELECT 1 FROM players WHERE lower(name) = lower(?)', name))
 			return fail(400, { mode: 'signup', name, msg: `${name} is taken. Sign in instead?` });
 
-		const id = Number(
-			db.prepare('INSERT INTO players (name, pass) VALUES (?, ?) RETURNING id').get(name, hashPass(pass))!.id
-		);
-		signIn(cookies, id, url.protocol === 'https:');
+		const row = await one<{ id: number }>(
+			'INSERT INTO players (name, pass) VALUES (?, ?) RETURNING id', name, hashPass(pass));
+		await signIn(cookies, Number(row!.id), url.protocol === 'https:');
 		redirect(303, '/');
 	}
 };

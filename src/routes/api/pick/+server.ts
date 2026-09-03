@@ -1,5 +1,5 @@
 import { json, error } from '@sveltejs/kit';
-import { db } from '$lib/server/db';
+import { one, run } from '$lib/server/db';
 import { mlDead } from '$lib/scoring';
 import type { RequestHandler } from './$types';
 
@@ -12,11 +12,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	if (kind !== 'spread' && kind !== 'ml') error(400, 'bad kind');
 	if (side !== 'home' && side !== 'away' && side !== null) error(400, 'bad side');
 
-	const g = db
-		.prepare(`SELECT state, spread, ml_home, ml_away, datetime(start) <= datetime('now') AS started FROM games WHERE id = ?`)
-		.get(gameId) as
-		| { state: string; spread: number | null; ml_home: number | null; ml_away: number | null; started: number }
-		| undefined;
+	const g = await one<{
+		state: string; spread: number | null;
+		ml_home: number | null; ml_away: number | null; started: boolean;
+	}>('SELECT state, spread, ml_home, ml_away, start <= now() AS started FROM games WHERE id = ?', gameId);
 	if (!g) error(404, 'no such game');
 	if (g.state !== 'pre' || g.started) error(409, 'game has started');
 
@@ -27,19 +26,17 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	if (side !== null && kind === 'ml' && mlDead(price)) error(409, 'that side pays nothing');
 
 	if (side === null) {
-		db.prepare('DELETE FROM picks WHERE player_id = ? AND game_id = ? AND kind = ?').run(
-			locals.player.id, gameId, kind
-		);
+		await run('DELETE FROM picks WHERE player_id = ? AND game_id = ? AND kind = ?',
+			locals.player.id, gameId, kind);
 		return json({ ok: true, side: null });
 	}
 
-	db.prepare(
+	await run(
 		`INSERT INTO picks (player_id, game_id, kind, side, spread_at, odds_at)
      VALUES (?,?,?,?,?,?)
-     ON CONFLICT(player_id, game_id, kind) DO UPDATE SET
+     ON CONFLICT (player_id, game_id, kind) DO UPDATE SET
        side = excluded.side, spread_at = excluded.spread_at,
-       odds_at = excluded.odds_at, created_at = datetime('now')`
-	).run(
+       odds_at = excluded.odds_at, created_at = now()`,
 		locals.player.id, gameId, kind, side,
 		g.spread,
 		kind === 'ml' ? price : null

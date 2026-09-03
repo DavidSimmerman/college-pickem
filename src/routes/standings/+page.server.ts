@@ -1,5 +1,5 @@
 import { redirect } from '@sveltejs/kit';
-import { db } from '$lib/server/db';
+import { all } from '$lib/server/db';
 import { gradeSpread, gradeMl, mlPoints, type Side } from '$lib/scoring';
 import type { PageServerLoad } from './$types';
 
@@ -12,13 +12,12 @@ type Row = {
 	home_logo: string | null; away_logo: string | null;
 };
 
-export const load: PageServerLoad = ({ locals }) => {
+export const load: PageServerLoad = async ({ locals }) => {
 	if (!locals.player) redirect(303, '/login');
 
 	// Only completed games count. Grading reuses the same functions the UI does.
-	const rows = db
-		.prepare(
-			`SELECT pk.player_id, p.name, pk.kind, pk.side, pk.spread_at, pk.odds_at,
+	const rows = await all<Row>(
+		`SELECT pk.player_id, p.name, pk.kind, pk.side, pk.spread_at, pk.odds_at,
               g.spread, g.home_score, g.away_score, g.week, g.state,
               g.home_abbr, g.away_abbr, g.home_name, g.away_name, g.home_logo, g.away_logo
        FROM picks pk
@@ -26,8 +25,7 @@ export const load: PageServerLoad = ({ locals }) => {
        JOIN games g   ON g.id = pk.game_id
        WHERE g.state = 'post' AND g.home_score IS NOT NULL
        ORDER BY g.week, g.start`
-		)
-		.all() as Row[];
+	);
 
 	const board = new Map<
 		number,
@@ -67,9 +65,8 @@ export const load: PageServerLoad = ({ locals }) => {
 
 	// Games of the Week is a straight win/loss record — no odds, no points. Only a
 	// submitted board counts, so a half-filled one is worth nothing however good it looks.
-	const gotwRows = db
-		.prepare(
-			`SELECT sp.player_id, sp.side, g.home_score, g.away_score
+	const gotwRows = await all<{ player_id: number; side: Side; home_score: number; away_score: number }>(
+		`SELECT sp.player_id, sp.side, g.home_score, g.away_score
        FROM slate_picks sp
        JOIN players p ON p.id = sp.player_id
        JOIN games g   ON g.id = sp.game_id
@@ -77,8 +74,7 @@ export const load: PageServerLoad = ({ locals }) => {
        JOIN slate_submits sub
          ON sub.player_id = sp.player_id AND sub.season = s.season AND sub.week = s.week
        WHERE g.state = 'post' AND g.home_score IS NOT NULL`
-		)
-		.all() as { player_id: number; side: Side; home_score: number; away_score: number }[];
+	);
 
 	const cards = new Map<number, { w: number; l: number }>();
 	for (const r of gotwRows) {
@@ -90,12 +86,13 @@ export const load: PageServerLoad = ({ locals }) => {
 
 	// Games of the Week gets its own board: it is the headline mode, it is win/loss, and
 	// folding it into a points column buried it.
+	const names = new Map(
+		(await all<{ id: number; name: string }>('SELECT id, name FROM players')).map((p) => [p.id, p.name])
+	);
 	const gotw = [...cards.entries()]
 		.map(([id, v]) => ({
 			id,
-			name: (rows.find((r) => r.player_id === id)?.name ??
-				(db.prepare('SELECT name FROM players WHERE id = ?').get(id) as { name: string } | undefined)?.name ??
-				'—') as string,
+			name: names.get(id) ?? '—',
 			w: v.w, l: v.l,
 			pct: v.w + v.l ? v.w / (v.w + v.l) : 0
 		}))
