@@ -9,8 +9,10 @@ export type SlateState = {
 	frozen: boolean;
 	submitted: boolean;
 	deadline: string | null; // first kickoff on the board
-	open: boolean; // still editable
-	filled: number;
+	open: boolean; // still accepting picks and a submission
+	filled: number; // games with a pick, of any kind
+	openLeft: number; // games still pickable that have no pick — these block submitting
+	missed: number; // games that kicked off before you got to them
 	size: number;
 };
 
@@ -45,7 +47,10 @@ function freezeIfReady(season: number, week: number): boolean {
 export function getSlate(playerId: number, season: number, week: number): SlateState {
 	const frozen = freezeIfReady(season, week);
 	if (!frozen) {
-		return { games: [], frozen: false, submitted: false, deadline: null, open: false, filled: 0, size: SLATE_SIZE };
+		return {
+			games: [], frozen: false, submitted: false, deadline: null,
+			open: false, filled: 0, openLeft: 0, missed: 0, size: SLATE_SIZE
+		};
 	}
 
 	const games = db
@@ -70,22 +75,25 @@ export function getSlate(playerId: number, season: number, week: number): SlateS
 		.prepare('SELECT 1 FROM slate_submits WHERE player_id = ? AND season = ? AND week = ?')
 		.get(playerId, season, week);
 
-	// One deadline for the whole slate, not per game: a set you cannot finish is worse
-	// than one you never started, so it closes the moment its first game kicks off.
+	// Each game locks at its own kickoff rather than the whole board locking at the
+	// first one. So the card stays open all week: started games grey out, and what you
+	// still owe is a pick on every game that has not kicked off yet.
 	const first = db
 		.prepare(
-			`SELECT MIN(datetime(g.start)) AS d, MIN(datetime(g.start)) <= datetime('now') AS gone
+			`SELECT MIN(datetime(g.start)) AS d
        FROM slate s JOIN games g ON g.id = s.game_id WHERE s.season = ? AND s.week = ?`
 		)
-		.get(season, week) as { d: string | null; gone: number };
+		.get(season, week) as { d: string | null };
 
 	return {
 		games,
 		frozen: true,
 		submitted,
 		deadline: first?.d ?? null,
-		open: !submitted && !first?.gone,
+		open: !submitted,
 		filled: games.filter((g) => g.slate_pick).length,
+		openLeft: games.filter((g) => !g.slate_pick && !g.locked).length,
+		missed: games.filter((g) => !g.slate_pick && g.locked).length,
 		size: games.length
 	};
 }

@@ -62,7 +62,11 @@
 			...slate,
 			games: slate.games.map((x: any) => (x.id === g.id ? { ...x, slate_pick: side } : x))
 		};
-		slate = { ...slate, filled: slate.games.filter((x: any) => x.slate_pick).length };
+		slate = {
+			...slate,
+			filled: slate.games.filter((x: any) => x.slate_pick).length,
+			openLeft: slate.games.filter((x: any) => !x.slate_pick && !x.locked).length
+		};
 		err = '';
 		const res = await fetch('/api/slate', {
 			method: 'POST',
@@ -76,7 +80,7 @@
 	}
 
 	async function submitSlate() {
-		if (slate.filled < slate.size || !slate.open || submitting) return;
+		if (slate.openLeft > 0 || !slate.open || submitting) return;
 		submitting = true;
 		const res = await fetch('/api/slate', {
 			method: 'POST',
@@ -256,11 +260,13 @@
 					<span class="cond shrink-0 border px-2 py-0.5 text-[13px] font-bold tracking-wider"
 						style="border-color:var(--bad);color:var(--bad)">CLOSED</span>
 				{:else}
-					<button onclick={submitSlate} disabled={slate.filled < slate.size || submitting}
+					{@const owed = slate.openLeft > 0}
+					<button onclick={submitSlate} disabled={owed || submitting}
 						class="cond shrink-0 border px-3 py-0.5 text-[13px] font-bold tracking-wider transition-colors disabled:cursor-not-allowed"
-						style="border-color:{slate.filled < slate.size ? 'var(--edge)' : '#f2c14e'};
-							background:{slate.filled < slate.size ? 'transparent' : '#f2c14e'};
-							color:{slate.filled < slate.size ? '#5b6478' : '#12141c'}"
+						title={owed ? `${slate.openLeft} game${slate.openLeft === 1 ? '' : 's'} left to pick` : 'Lock in this card'}
+						style="border-color:{owed ? 'var(--edge)' : '#f2c14e'};
+							background:{owed ? 'transparent' : '#f2c14e'};
+							color:{owed ? '#5b6478' : '#12141c'}"
 					>{submitting ? 'SENDING' : 'SUBMIT'}</button>
 				{/if}
 			</div>
@@ -314,10 +320,10 @@
 					{@const hc = teamBg(g.home_color, g.home_alt_color, g.home_logo_color)}
 					{@const done = g.state === 'post'}
 					{@const picked = pickOn(g)}
-					{@const dead = deadGame(g)}
+					{@const shut = deadGame(g) || (mode === 'slate' && !!g.locked)}
 					{@const res = picked && done ? outcome(g) : null}
 					<article class="border transition-opacity" style="border-color:var(--edge);background:#0f121a;
-					{dead ? 'filter:grayscale(1);opacity:0.5' : ''}">
+					{shut ? 'filter:grayscale(1);opacity:0.5' : ''}">
 						<div class="flex items-center gap-2 border-b px-2.5 py-1.5" style="border-color:var(--line)">
 							<!-- The rank rides inside the header. Sitting outside the card it pushed
 							     every game off-centre and left them narrower than the bar above. -->
@@ -437,7 +443,15 @@
 				<p class="cond text-[13px] leading-relaxed tracking-wider" style="color:var(--dim)">
 					THE TEN GAMES THAT MATTER, RANKED. PICK EVERY WINNER STRAIGHT UP, THEN SUBMIT.<br />
 					<span style="opacity:.7">Win-loss only — no points here.</span>
-					{#if slate.deadline}<br /><span style="opacity:.7">Closes at first kickoff — {et(slate.deadline.replace(' ', 'T') + 'Z')}.</span>{/if}
+					<br /><span style="opacity:.7">
+					Each game locks at its own kickoff. You can still submit after that — the ones that
+					started just drop out.
+				</span>
+				{#if slate.missed && !slate.submitted}
+					<br /><span style="color:var(--bad)">
+						{slate.missed} game{slate.missed === 1 ? '' : 's'} kicked off before you picked {slate.missed === 1 ? 'it' : 'them'}.
+					</span>
+				{/if}
 				</p>
 				{#each slate.games as g, i (g.id)}
 					{@render gameCard(g, i + 1)}

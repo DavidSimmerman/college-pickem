@@ -17,10 +17,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const card = getSlate(locals.player.id, season, week);
 	if (!card.frozen) error(409, "this week's games are not set yet");
 	if (card.submitted) error(409, 'already submitted');
-	if (!card.open) error(409, 'picks closed when the first game kicked off');
+	if (!card.open) error(409, 'this card is closed');
 
 	if (body.action === 'submit') {
-		if (card.filled < card.size) error(409, `pick all ${card.size} games first`);
+		// Only games that can still be picked are owed. One that kicked off before you
+		// got to it is gone, and holding the whole card hostage to it helps nobody.
+		if (card.openLeft > 0)
+			error(409, `pick the ${card.openLeft} game${card.openLeft === 1 ? '' : 's'} that ${card.openLeft === 1 ? 'has' : 'have'} not kicked off yet`);
 		db.prepare('INSERT INTO slate_submits (player_id, season, week) VALUES (?,?,?)').run(
 			locals.player.id, season, week
 		);
