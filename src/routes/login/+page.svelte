@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { MAX_WIN, RISK } from '$lib/scoring';
 	let { data, form } = $props();
 
 	// The failed action decides which tab you land back on, so an error never appears
@@ -84,10 +83,12 @@
 			</p>
 		{/if}
 
-		<button disabled={busy} class="display slant h-12 w-full text-[16px] disabled:opacity-60"
-			style="background:var(--hot);color:#12141c">
-			{busy ? 'ONE SECOND' : isUp ? 'CREATE ACCOUNT' : 'SIGN IN'}
-		</button>
+		<div class="pt-3">
+			<button disabled={busy} class="display slant h-12 w-full text-[16px] disabled:opacity-60"
+				style="background:var(--hot);color:#12141c">
+				{busy ? 'ONE SECOND' : isUp ? 'CREATE ACCOUNT' : 'SIGN IN'}
+			</button>
+		</div>
 	</form>
 
 	{#if data.google}
@@ -109,14 +110,4 @@
 		</a>
 	{/if}
 
-	<div class="mt-8 border-t pt-4" style="border-color:var(--edge)">
-		<p class="cond text-[13px] leading-relaxed tracking-wide" style="color:#5b6478">
-			GAMES OF THE WEEK IS TEN CURATED GAMES, PICKED STRAIGHT UP, WIN/LOSS ONLY.
-			SPREADS ARE WIN/LOSS TOO. MONEYLINE PAYS THE ODDS AND COSTS
-			<b style="color:var(--bad)">{RISK}</b> WHEN IT MISSES —
-			A <b style="color:var(--ok)">+350</b> DOG EARNS <b style="color:var(--ok)">35</b>,
-			A <b style="color:var(--led)">-400</b> FAVOURITE EARNS <b style="color:var(--led)">3</b>,
-			CAPPED AT <b style="color:var(--ok)">{MAX_WIN}</b>. CHASING CHALK BLEEDS YOU.
-		</p>
-	</div>
 </div>

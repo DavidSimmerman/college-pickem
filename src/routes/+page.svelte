@@ -309,16 +309,22 @@
 	</div>
 
 	<!-- One game, shared by the grouped board and Games of the Week. -->
-	{#snippet gameCard(g: any)}
+	{#snippet gameCard(g: any, seed?: number)}
 					{@const ac = teamBg(g.away_color, g.away_alt_color, g.away_logo_color)}
 					{@const hc = teamBg(g.home_color, g.home_alt_color, g.home_logo_color)}
 					{@const done = g.state === 'post'}
 					{@const picked = pickOn(g)}
-				{@const dead = deadGame(g)}
+					{@const dead = deadGame(g)}
 					{@const res = picked && done ? outcome(g) : null}
 					<article class="border transition-opacity" style="border-color:var(--edge);background:#0f121a;
 					{dead ? 'filter:grayscale(1);opacity:0.5' : ''}">
 						<div class="flex items-center gap-2 border-b px-2.5 py-1.5" style="border-color:var(--line)">
+							<!-- The rank rides inside the header. Sitting outside the card it pushed
+							     every game off-centre and left them narrower than the bar above. -->
+							{#if seed}
+								<span class="display text-[13px] leading-none"
+									style="color:{picked ? '#f2c14e' : '#5b6478'}">{seed}</span>
+							{/if}
 							<span class="cond text-[13px] font-semibold tracking-[0.12em]"
 								style="color:{g.state === 'in' ? 'var(--hot)' : 'var(--dim)'}">
 								{#if g.state === 'in'}● {g.detail}{:else if done}{g.detail}{:else}{et(g.start)}{/if}
@@ -341,7 +347,7 @@
 								{@const c = side === 'away' ? ac : hc}
 								{@const rank = g[`${side}_rank`]}
 								{@const odds = side === 'home' ? g.ml_home : g.ml_away}
-								{@const lockedAt = mode === 'slate' ? g.card_odds_at : g.ml_odds_at}
+								{@const lockedAt = mode === 'slate' ? g.slate_odds_at : g.ml_odds_at}
 								{@const shownOdds = picked === side && lockedAt != null ? lockedAt : odds}
 								{@const on = picked === side}
 								{@const fg = on ? inkOn(c) : '#e8eaf0'}
@@ -434,11 +440,7 @@
 					{#if slate.deadline}<br /><span style="opacity:.7">Closes at first kickoff — {et(slate.deadline.replace(' ', 'T') + 'Z')}.</span>{/if}
 				</p>
 				{#each slate.games as g, i (g.id)}
-					<div class="flex items-start gap-2">
-						<span class="display mt-3 w-5 shrink-0 text-right text-[15px] leading-none"
-							style="color:{g.card_pick ? '#f2c14e' : 'var(--dim)'}">{i + 1}</span>
-						<div class="min-w-0 flex-1">{@render gameCard(g)}</div>
-					</div>
+					{@render gameCard(g, i + 1)}
 				{/each}
 			{/if}
 		</div>
