@@ -1,12 +1,11 @@
 import { json, error } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
-import { getCard } from '$lib/server/slate';
-import { mlDead } from '$lib/scoring';
+import { getSlate } from '$lib/server/slate';
 import type { RequestHandler } from './$types';
 
 /**
- * Card picks and card submission. Every rule is re-checked here — the client decides
- * what to grey out, but it never decides what counts.
+ * Games of the Week: picks and submission. Every rule is re-checked here — the client
+ * decides what to grey out, but it never decides what counts.
  */
 export const POST: RequestHandler = async ({ request, locals }) => {
 	if (!locals.player) error(401, 'sign in first');
@@ -15,10 +14,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const week = Number(body.week);
 	if (!Number.isInteger(season) || !Number.isInteger(week)) error(400, 'bad week');
 
-	const card = getCard(locals.player.id, season, week);
-	if (!card.frozen) error(409, 'the card for this week is not set yet');
-	if (card.submitted) error(409, 'card already submitted');
-	if (!card.open) error(409, 'the card closed when the first game kicked off');
+	const card = getSlate(locals.player.id, season, week);
+	if (!card.frozen) error(409, "this week's games are not set yet");
+	if (card.submitted) error(409, 'already submitted');
+	if (!card.open) error(409, 'picks closed when the first game kicked off');
 
 	if (body.action === 'submit') {
 		if (card.filled < card.size) error(409, `pick all ${card.size} games first`);
@@ -41,11 +40,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		.get(season, week, gameId) as
 		| { ml_home: number | null; ml_away: number | null; state: string; started: number }
 		| undefined;
-	if (!g) error(404, 'that game is not on this card');
+	if (!g) error(404, 'that game is not on this week\'s board');
 	if (g.state !== 'pre' || g.started) error(409, 'game has started');
 
+	// Kept only as a record of how the game was priced when the pick was made — Games of
+	// the Week is win/loss, so this never feeds a score.
 	const price = side === 'home' ? g.ml_home : g.ml_away;
-	if (mlDead(price)) error(409, 'that side pays nothing — pick the other one');
 
 	db.prepare(
 		`INSERT INTO slate_picks (player_id, game_id, side, odds_at) VALUES (?,?,?,?)
@@ -53,6 +53,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
        side = excluded.side, odds_at = excluded.odds_at, created_at = datetime('now')`
 	).run(locals.player.id, gameId, side, price);
 
-	const after = getCard(locals.player.id, season, week);
+	const after = getSlate(locals.player.id, season, week);
 	return json({ ok: true, side, filled: after.filled, size: after.size });
 };

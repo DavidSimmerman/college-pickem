@@ -65,11 +65,11 @@ export const load: PageServerLoad = ({ locals }) => {
 		}
 	}
 
-	// Card points sit apart from the free-pick modes: only a submitted card counts, so a
-	// half-filled one is worth nothing however good the picks in it look.
-	const cardRows = db
+	// Games of the Week is a straight win/loss record — no odds, no points. Only a
+	// submitted board counts, so a half-filled one is worth nothing however good it looks.
+	const gotwRows = db
 		.prepare(
-			`SELECT sp.player_id, p.name, sp.side, sp.odds_at, g.home_score, g.away_score
+			`SELECT sp.player_id, sp.side, g.home_score, g.away_score
        FROM slate_picks sp
        JOIN players p ON p.id = sp.player_id
        JOIN games g   ON g.id = sp.game_id
@@ -78,14 +78,12 @@ export const load: PageServerLoad = ({ locals }) => {
          ON sub.player_id = sp.player_id AND sub.season = s.season AND sub.week = s.week
        WHERE g.state = 'post' AND g.home_score IS NOT NULL`
 		)
-		.all() as { player_id: number; name: string; side: Side; odds_at: number | null;
-                home_score: number; away_score: number }[];
+		.all() as { player_id: number; side: Side; home_score: number; away_score: number }[];
 
-	const cards = new Map<number, { pts: number; w: number; l: number }>();
-	for (const r of cardRows) {
-		const e = cards.get(r.player_id) ?? cards.set(r.player_id, { pts: 0, w: 0, l: 0 }).get(r.player_id)!;
+	const cards = new Map<number, { w: number; l: number }>();
+	for (const r of gotwRows) {
+		const e = cards.get(r.player_id) ?? cards.set(r.player_id, { w: 0, l: 0 }).get(r.player_id)!;
 		const o = gradeMl(r.side, r.home_score, r.away_score);
-		e.pts += mlPoints(o, r.odds_at);
 		if (o === 'win') e.w++;
 		else if (o === 'loss') e.l++;
 	}
@@ -94,12 +92,13 @@ export const load: PageServerLoad = ({ locals }) => {
 		.map(([id, v]) => ({
 			id, ...v,
 			pct: v.w + v.l ? v.w / (v.w + v.l) : 0,
-			card: cards.get(id)?.pts ?? 0,
-			cardW: cards.get(id)?.w ?? 0,
-			cardL: cards.get(id)?.l ?? 0,
+			gotwW: cards.get(id)?.w ?? 0,
+			gotwL: cards.get(id)?.l ?? 0,
 			byWeek: [...v.byWeek.entries()].sort((a, b) => a[0] - b[0])
 		}))
-		.sort((a, b) => b.ml + b.card - (a.ml + a.card) || b.pct - a.pct);
+		// Points still order the board; the Games of the Week record breaks ties, since it
+		// carries no points of its own.
+		.sort((a, b) => b.ml - a.ml || b.gotwW - a.gotwW || b.pct - a.pct);
 
 	return { players, ledger: ledger.reverse(), me: locals.player.id };
 };

@@ -52,29 +52,30 @@ CREATE TABLE IF NOT EXISTS watches (
   team       TEXT NOT NULL,
   PRIMARY KEY (player_id, team)
 );
--- The frozen picks-of-the-week card. Computed once and never recomputed: lines move
--- all week, and a slate that reshuffled under a card someone had already filled in
+-- The frozen Games of the Week board. Computed once and never recomputed: lines move
+-- all week, and a slate that reshuffled under a board someone had already filled in
 -- would orphan their picks.
 CREATE TABLE IF NOT EXISTS slate (
   season    INTEGER NOT NULL,
   week      INTEGER NOT NULL,
   game_id   TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
-  seed      INTEGER NOT NULL,       -- 1 = the best game on the card
+  seed      INTEGER NOT NULL,       -- 1 = the best game of the week
   frozen_at TEXT NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (season, week, game_id)
 );
--- Card picks live in their own table because they obey different rules: one per game,
--- no kind, and worthless until the whole card is submitted.
+-- These live in their own table because they obey different rules: one per game, no
+-- kind, scored win/loss rather than on points, and worthless until the whole board is
+-- submitted.
 CREATE TABLE IF NOT EXISTS slate_picks (
   player_id  INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
   game_id    TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
   side       TEXT NOT NULL CHECK (side IN ('home','away')),
-  odds_at    INTEGER,               -- price locked in at pick time
+  odds_at    INTEGER,               -- how it was priced at pick time; a record, not a score
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (player_id, game_id)
 );
--- A card is all or nothing. Until this row exists the picks are a draft, and a draft
--- scores nothing however good it looks.
+-- All or nothing. Until this row exists the picks are a draft, and a draft counts for
+-- nothing however good it looks.
 CREATE TABLE IF NOT EXISTS slate_submits (
   player_id    INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
   season       INTEGER NOT NULL,

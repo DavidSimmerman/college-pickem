@@ -51,6 +51,14 @@ body {
 
 /* Native details/summary drives every accordion — free keyboard + a11y. */
 .grp > summary { list-style: none; cursor: pointer; }
+
+/* Tailwind 4 dropped `cursor: pointer` on buttons from its preflight, so every control
+   in the app — picking a team included — was showing the default arrow. Put it back
+   once here rather than on each button, and leave disabled controls alone. */
+button:not(:disabled),
+[role='tab']:not([aria-disabled='true']) {
+	cursor: pointer;
+}
 .grp > summary::-webkit-details-marker { display: none; }
 .caret {
 	width: 0; height: 0; flex-shrink: 0;

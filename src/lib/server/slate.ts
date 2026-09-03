@@ -1,14 +1,14 @@
-// Freezing and reading the picks-of-the-week card. The ranking itself lives in
-// $lib/slate; this module is only about when a card becomes real and who may change it.
+// Freezing and reading Games of the Week. The ranking itself lives in $lib/slate; this
+// module is only about when a week's slate becomes real and who may still change it.
 
 import { db } from './db';
 import { buildSlate, SLATE_SIZE, type SlateGame } from '$lib/slate';
 
-export type Card = {
+export type SlateState = {
 	games: any[];
 	frozen: boolean;
 	submitted: boolean;
-	deadline: string | null; // first kickoff on the card
+	deadline: string | null; // first kickoff on the board
 	open: boolean; // still editable
 	filled: number;
 	size: number;
@@ -16,7 +16,7 @@ export type Card = {
 
 /**
  * Lines post gradually through the week, so a card frozen on Tuesday off three priced
- * games would be junk that nobody could unfreeze. We hold off until a full card's worth
+ * games would be junk that nobody could unfreeze. We hold off until a full slate's worth
  * of games are actually pickable, then freeze once and never look again.
  */
 function freezeIfReady(season: number, week: number): boolean {
@@ -41,8 +41,8 @@ function freezeIfReady(season: number, week: number): boolean {
 	return true;
 }
 
-/** The card for one week from one player's point of view. */
-export function getCard(playerId: number, season: number, week: number): Card {
+/** One week's Games of the Week from one player's point of view. */
+export function getSlate(playerId: number, season: number, week: number): SlateState {
 	const frozen = freezeIfReady(season, week);
 	if (!frozen) {
 		return { games: [], frozen: false, submitted: false, deadline: null, open: false, filled: 0, size: SLATE_SIZE };
@@ -51,7 +51,7 @@ export function getCard(playerId: number, season: number, week: number): Card {
 	const games = db
 		.prepare(
 			`SELECT g.*, s.seed,
-              sp.side AS card_pick, sp.odds_at AS card_odds_at,
+              sp.side AS slate_pick, sp.odds_at AS slate_odds_at,
               datetime(g.start) <= datetime('now') OR g.state != 'pre' AS locked,
               hlc.color AS home_logo_color, alc.color AS away_logo_color,
               hlc.halo_on AS home_halo_on, hlc.halo_off AS home_halo_off,
@@ -70,7 +70,7 @@ export function getCard(playerId: number, season: number, week: number): Card {
 		.prepare('SELECT 1 FROM slate_submits WHERE player_id = ? AND season = ? AND week = ?')
 		.get(playerId, season, week);
 
-	// One deadline for the whole card, not per game: a card you cannot finish is worse
+	// One deadline for the whole slate, not per game: a set you cannot finish is worse
 	// than one you never started, so it closes the moment its first game kicks off.
 	const first = db
 		.prepare(
@@ -85,7 +85,7 @@ export function getCard(playerId: number, season: number, week: number): Card {
 		submitted,
 		deadline: first?.d ?? null,
 		open: !submitted && !first?.gone,
-		filled: games.filter((g) => g.card_pick).length,
+		filled: games.filter((g) => g.slate_pick).length,
 		size: games.length
 	};
 }

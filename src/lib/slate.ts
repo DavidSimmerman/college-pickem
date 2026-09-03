@@ -1,4 +1,4 @@
-// "Picks of the week" — the ten games the show would actually go to.
+// "Games of the Week" — the ten games the show would actually go to.
 //
 // ESPN's GameDay crew makes an editorial call, not a calculation, but the thing they
 // optimise for is consistent enough to model: a close game between two teams worth
@@ -18,8 +18,8 @@ import { mlDead } from './scoring.ts';
 const POWER = new Set(['SEC', 'Big Ten', 'Big 12', 'ACC', 'FBS Independents']);
 const MID = new Set(['American', 'Mountain West', 'Sun Belt', 'MAC', 'CUSA', 'Pac-12']);
 
-/** How many games the weekly slate holds. One constant: week 1 is the thinnest slate
- *  of the season, and a November Saturday could justify more. */
+/** How many games are on the board each week. One constant: week 1 is the thinnest
+ *  slate of the season, and a November Saturday could justify more. */
 export const SLATE_SIZE = 10;
 
 /** At least this many pure mid-major games are guaranteed a spot. */
@@ -75,11 +75,12 @@ export function slateScore(g: SlateGame): number {
 }
 
 /**
- * The week's slate, best first. A game is only eligible if BOTH sides are live: no
- * moneyline means it cannot be scored, and a side so short it pays nothing means there
- * is only one legal answer. Either way it is not a decision, and a card of forced
- * picks is not a card. (Miami -3200 at Stanford cleared the ranking on Miami's name
- * alone and would have burned a slot on a game nobody could get wrong.)
+ * The week's slate, best first. A game is only eligible if BOTH sides are live. No
+ * moneyline means we cannot tell how lopsided it is; a side priced near-certain means
+ * everyone picks it and everyone banks the same win, which decides nothing. Neither is
+ * a decision, and ten forced non-decisions is not a contest. (Miami -3200 at Stanford
+ * cleared the ranking on Miami's name alone and would have burned a slot on a game
+ * nobody could get wrong.)
  *
  * The mid-major lock runs after the ranking: if the top N is all power conferences,
  * the best pure mid-major game displaces the weakest game in it. Otherwise the MAC
@@ -130,20 +131,20 @@ export async function selfTest() {
 	// ...which is exactly why the lock has to exist.
 	const board = [ranked, g({ spread: -1 }), g({ spread: -2 }), midMajor];
 	a.ok(buildSlate(board, 3).some((x) => x.id === midMajor.id), 'the mid-major lock forces one in');
-	a.equal(buildSlate(board, 3).length, 3, 'the lock displaces rather than growing the card');
+	a.equal(buildSlate(board, 3).length, 3, 'the lock displaces rather than growing the board');
 
 	// Ineligible games never make a card: they are not decisions.
 	const noLine = g({ ml_home: null, ml_away: null, spread: 0 });
 	const oneSided = g({ ml_home: -100000, ml_away: 5000, spread: 0 });
 	const fine = g({ spread: -3 });
 	const built = buildSlate([noLine, oneSided, fine], 3);
-	a.deepEqual(built.map((x) => x.id), [fine.id], 'no-line and pays-nothing games are excluded');
+	a.deepEqual(built.map((x) => x.id), [fine.id], 'no-line and foregone games are excluded');
 
 	// Ordering is by score, best first, and stable across calls.
 	const many = [g({ spread: -20 }), g({ spread: -1 }), g({ spread: -10 })];
 	const order = buildSlate(many, 3).map((x) => x.id);
 	a.deepEqual(order, buildSlate(many, 3).map((x) => x.id), 'the same input gives the same card');
-	a.equal(order[0], many[1].id, 'the closest game leads the card');
+	a.equal(order[0], many[1].id, 'the closest game leads the board');
 
 	a.equal(tierOf(g({ home_conf: SEC, away_conf: MAC })), 'mixed');
 	a.equal(tierOf(g({ home_conf: MAC, away_conf: MAC })), 'mid');

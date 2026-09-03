@@ -6,9 +6,9 @@
 
 	let { data } = $props();
 
-	let mode = $state<'spread' | 'ml' | 'card'>('spread');
+	let mode = $state<'spread' | 'ml' | 'slate'>('spread');
 	let games = $state(data.games);
-	let card = $state(data.card);
+	let slate = $state(data.slate);
 	let watched = $state(new Set(data.watched));
 	let err = $state('');
 	let submitting = $state(false);
@@ -20,7 +20,7 @@
 
 	$effect(() => {
 		games = data.games;
-		card = data.card;
+		slate = data.slate;
 		watched = new Set(data.watched);
 	});
 
@@ -33,7 +33,7 @@
 
 	async function pick(g: any, side: Side) {
 		if (g.locked || deadSide(g, side)) return;
-		if (mode === 'card') return cardPick(g, side);
+		if (mode === 'slate') return slatePick(g, side);
 		const key = mode === 'spread' ? 'spread_pick' : 'ml_pick';
 		const next = g[key] === side ? null : side;
 		const prev = games;
@@ -54,17 +54,15 @@
 		}
 	}
 
-	/** A card pick cannot be cleared, only moved: the card must end up complete. */
-	async function cardPick(g: any, side: Side) {
-		if (!card.open) return;
-		const prev = card;
-		card = {
-			...card,
-			games: card.games.map((x: any) =>
-				x.id === g.id ? { ...x, card_pick: side, card_odds_at: side === 'home' ? x.ml_home : x.ml_away } : x
-			)
+	/** A pick here cannot be cleared, only moved: the board must end up complete. */
+	async function slatePick(g: any, side: Side) {
+		if (!slate.open) return;
+		const prev = slate;
+		slate = {
+			...slate,
+			games: slate.games.map((x: any) => (x.id === g.id ? { ...x, slate_pick: side } : x))
 		};
-		card = { ...card, filled: card.games.filter((x: any) => x.card_pick).length };
+		slate = { ...slate, filled: slate.games.filter((x: any) => x.slate_pick).length };
 		err = '';
 		const res = await fetch('/api/slate', {
 			method: 'POST',
@@ -72,13 +70,13 @@
 			body: JSON.stringify({ season: data.season, week: data.week, gameId: g.id, side })
 		});
 		if (!res.ok) {
-			card = prev;
+			slate = prev;
 			err = (await res.text().catch(() => '')) || 'Could not save that pick.';
 		}
 	}
 
-	async function submitCard() {
-		if (card.filled < card.size || !card.open || submitting) return;
+	async function submitSlate() {
+		if (slate.filled < slate.size || !slate.open || submitting) return;
 		submitting = true;
 		const res = await fetch('/api/slate', {
 			method: 'POST',
@@ -86,8 +84,8 @@
 			body: JSON.stringify({ season: data.season, week: data.week, action: 'submit' })
 		});
 		submitting = false;
-		if (res.ok) card = { ...card, submitted: true, open: false };
-		else err = (await res.text().catch(() => '')) || 'Could not submit your card.';
+		if (res.ok) slate = { ...slate, submitted: true, open: false };
+		else err = (await res.text().catch(() => '')) || 'Could not submit your picks.';
 	}
 
 	async function toggleWatch(team: string) {
@@ -148,18 +146,21 @@
 	const isOpen = (name: string) => openChoice[name] ?? defaultOpen(name);
 
 	/**
-	 * A side you cannot pick. On the moneyline and on the card a price that pays nothing
-	 * for a correct pick is pure downside, and a game with no line at all cannot be
-	 * priced either way — both grey out rather than pretending to be a choice.
+	 * A side you cannot pick. On the moneyline a price that pays nothing for a correct
+	 * pick is pure downside, and a game with no line cannot be priced either way — both
+	 * grey out rather than pretending to be a choice. Games of the Week needs no such
+	 * rule: it is scored win/loss, and foregone games never make the board to begin with.
 	 */
 	const deadSide = (g: any, side: Side) =>
-		mode !== 'spread'
+		mode === 'ml'
 			? mlDead(side === 'home' ? g.ml_home : g.ml_away)
-			: g.spread === null;
+			: mode === 'spread'
+				? g.spread === null
+				: false;
 	const deadGame = (g: any) => deadSide(g, 'home') && deadSide(g, 'away');
 
 	const pickOn = (g: any) =>
-		mode === 'spread' ? g.spread_pick : mode === 'ml' ? g.ml_pick : g.card_pick;
+		mode === 'spread' ? g.spread_pick : mode === 'ml' ? g.ml_pick : g.slate_pick;
 
 	const mlPicks = $derived(shown.filter((g: any) => g.ml_pick));
 	const upside = $derived(mlPicks.reduce((t: number, g: any) => t + mlWin(g.ml_odds_at ?? 0), 0));
@@ -194,7 +195,7 @@
 	<!-- mode: spreads, moneyline, or the weekly card -->
 	<div class="sticky top-0 z-30 -mx-3 mb-3 px-3 pb-2 pt-2 backdrop-blur-md" style="background:color-mix(in oklab, var(--bg) 88%, transparent)">
 		<div class="flex gap-[3px]">
-			{#each [['spread', 'SPREADS', spreadCount, 'var(--hot)'], ['ml', 'MONEYLINE', mlPicks.length, 'var(--led)'], ['card', 'THE CARD', card.frozen ? card.filled : 0, '#f2c14e']] as const as [m, label, n, hue]}
+			{#each [['spread', 'SPREADS', spreadCount, 'var(--hot)'], ['ml', 'MONEYLINE', mlPicks.length, 'var(--led)'], ['slate', 'GAMES OF THE WEEK', slate.frozen ? slate.filled : 0, '#f2c14e']] as const as [m, label, n, hue]}
 				<button onclick={() => (mode = m)} aria-pressed={mode === m}
 					class="slant cond h-10 flex-1 border text-[13px] font-bold tracking-[0.12em] transition-colors"
 					style="border-color:{mode === m ? 'transparent' : 'var(--edge)'};
@@ -209,27 +210,27 @@
 				<span>ALL MISS <b style="color:var(--bad)">{fmtPts(mlPicks.length * mlLose())}</b></span>
 			</p>
 		{/if}
-		{#if mode === 'card' && card.frozen}
+		{#if mode === 'slate' && slate.frozen}
 			<div class="mt-1.5 flex items-center gap-2">
 				<div class="h-1.5 flex-1 border" style="border-color:var(--edge);background:var(--panel)">
 					<div class="h-full transition-all"
-						style="width:{(card.filled / card.size) * 100}%;background:{card.submitted ? 'var(--ok)' : '#f2c14e'}"></div>
+						style="width:{(slate.filled / slate.size) * 100}%;background:{slate.submitted ? 'var(--ok)' : '#f2c14e'}"></div>
 				</div>
 				<span class="cond shrink-0 text-[13px] tracking-wider" style="color:var(--dim)">
-					{card.filled} / {card.size}
+					{slate.filled} / {slate.size}
 				</span>
-				{#if card.submitted}
+				{#if slate.submitted}
 					<span class="cond shrink-0 border px-2 py-0.5 text-[13px] font-bold tracking-wider"
 						style="border-color:var(--ok);color:var(--ok)">SUBMITTED</span>
-				{:else if !card.open}
+				{:else if !slate.open}
 					<span class="cond shrink-0 border px-2 py-0.5 text-[13px] font-bold tracking-wider"
 						style="border-color:var(--bad);color:var(--bad)">CLOSED</span>
 				{:else}
-					<button onclick={submitCard} disabled={card.filled < card.size || submitting}
+					<button onclick={submitSlate} disabled={slate.filled < slate.size || submitting}
 						class="cond shrink-0 border px-3 py-0.5 text-[13px] font-bold tracking-wider transition-colors disabled:cursor-not-allowed"
-						style="border-color:{card.filled < card.size ? 'var(--edge)' : '#f2c14e'};
-							background:{card.filled < card.size ? 'transparent' : '#f2c14e'};
-							color:{card.filled < card.size ? '#5b6478' : '#12141c'}"
+						style="border-color:{slate.filled < slate.size ? 'var(--edge)' : '#f2c14e'};
+							background:{slate.filled < slate.size ? 'transparent' : '#f2c14e'};
+							color:{slate.filled < slate.size ? '#5b6478' : '#12141c'}"
 					>{submitting ? 'SENDING' : 'SUBMIT'}</button>
 				{/if}
 			</div>
@@ -240,8 +241,8 @@
 		{/if}
 	</div>
 
-	<!-- search + filters: the card is a fixed ten, so it has nothing to filter -->
-	<div class="mb-4 space-y-2" class:hidden={mode === 'card'}>
+	<!-- search + filters: Games of the Week is a fixed ten, so it has nothing to filter -->
+	<div class="mb-4 space-y-2" class:hidden={mode === 'slate'}>
 		<label class="block">
 			<span class="sr-only">Search teams or conference</span>
 			<input type="search" bind:value={q} placeholder="SEARCH TEAM OR CONFERENCE" class="searchbox" />
@@ -262,7 +263,7 @@
 		</div>
 	</div>
 
-	<!-- One game, shared by the grouped board and the weekly card. -->
+	<!-- One game, shared by the grouped board and Games of the Week. -->
 	{#snippet gameCard(g: any)}
 					{@const ac = teamBg(g.away_color, g.away_alt_color, g.away_logo_color)}
 					{@const hc = teamBg(g.home_color, g.home_alt_color, g.home_logo_color)}
@@ -295,7 +296,7 @@
 								{@const c = side === 'away' ? ac : hc}
 								{@const rank = g[`${side}_rank`]}
 								{@const odds = side === 'home' ? g.ml_home : g.ml_away}
-								{@const lockedAt = mode === 'card' ? g.card_odds_at : g.ml_odds_at}
+								{@const lockedAt = mode === 'slate' ? g.card_odds_at : g.ml_odds_at}
 								{@const shownOdds = picked === side && lockedAt != null ? lockedAt : odds}
 								{@const on = picked === side}
 								{@const fg = on ? inkOn(c) : '#e8eaf0'}
@@ -303,9 +304,9 @@
 								{@const off = deadSide(g, side)}
 								<button
 									onclick={() => pick(g, side)}
-									disabled={g.locked || off || (mode === 'card' && !card.open)}
+									disabled={g.locked || off || (mode === 'slate' && !slate.open)}
 									aria-pressed={on}
-									aria-label="{mode === 'spread' ? 'Spread' : mode === 'ml' ? 'Moneyline' : 'Card'} pick {g[`${side}_name`]}"
+									aria-label="{mode === 'spread' ? 'Spread' : mode === 'ml' ? 'Moneyline' : 'Game of the week'} pick {g[`${side}_name`]}"
 									class="relative overflow-hidden px-2.5 pb-2.5 pt-3 text-left transition-all disabled:cursor-not-allowed"
 									class:border-l={side === 'home'}
 									class:pl-6={side === 'home'}
@@ -329,13 +330,17 @@
 									{/if}
 									<span class="display block text-[25px] leading-[0.9]">{g[`${side}_abbr`]}</span>
 
-									{#if mode === 'spread'}
+									{#if mode !== 'ml'}
+										<!-- Games of the Week is scored straight up, so the line is context only:
+										     shown so you can see who is favoured, never turned into points. -->
 										<span class="display mt-1.5 block text-[17px] leading-none">
-											{lineFor(on && g.spread_at !== null ? g.spread_at : g.spread, side)}
+											{lineFor(on && g.spread_at != null ? g.spread_at : g.spread, side)}
 										</span>
-										<span class="cond block text-[13px] font-semibold" style="opacity:.6">
-											{odds !== null ? fmtOdds(odds) : '—'}
-										</span>
+										{#if mode === 'spread'}
+											<span class="cond block text-[13px] font-semibold" style="opacity:.6">
+												{odds !== null ? fmtOdds(odds) : '—'}
+											</span>
+										{/if}
 									{:else if odds !== null}
 										<span class="display mt-1.5 block text-[17px] leading-none">{fmtOdds(shownOdds)}</span>
 										{#if off}
@@ -358,7 +363,7 @@
 									{#if res && res !== 'pending'}
 										<span class="display absolute right-0 top-0 px-1.5 py-0.5 text-[10px] leading-none"
 											style="background:{res === 'win' ? 'var(--ok)' : res === 'loss' ? 'var(--bad)' : '#6b7488'};color:#0b0d12">
-											{res === 'win' ? 'W' : res === 'loss' ? 'L' : 'PUSH'}{#if mode !== 'spread' && lockedAt}
+											{res === 'win' ? 'W' : res === 'loss' ? 'L' : 'PUSH'}{#if mode === 'ml' && lockedAt}
 												{fmtPts(mlPoints(res, lockedAt))}{/if}
 										</span>
 									{/if}
@@ -370,19 +375,20 @@
 					</article>
 	{/snippet}
 
-	{#if mode === 'card'}
+	{#if mode === 'slate'}
 		<div class="space-y-3">
-			{#if !card.frozen}
+			{#if !slate.frozen}
 				<p class="cond py-16 text-center text-[15px] leading-relaxed tracking-wider" style="color:var(--dim)">
-					THIS WEEK'S CARD ISN'T SET YET.<br />
+					THIS WEEK'S GAMES AREN'T SET YET.<br />
 					<span style="opacity:.7">It locks in once ten games have a moneyline.</span>
 				</p>
 			{:else}
 				<p class="cond text-[13px] leading-relaxed tracking-wider" style="color:var(--dim)">
-					THE TEN GAMES THAT MATTER, RANKED. PICK EVERY ONE, THEN SUBMIT.
-					{#if card.deadline}<br /><span style="opacity:.7">Closes at first kickoff — {et(card.deadline.replace(' ', 'T') + 'Z')}.</span>{/if}
+					THE TEN GAMES THAT MATTER, RANKED. PICK EVERY WINNER STRAIGHT UP, THEN SUBMIT.<br />
+					<span style="opacity:.7">Win-loss only — no points here.</span>
+					{#if slate.deadline}<br /><span style="opacity:.7">Closes at first kickoff — {et(slate.deadline.replace(' ', 'T') + 'Z')}.</span>{/if}
 				</p>
-				{#each card.games as g, i (g.id)}
+				{#each slate.games as g, i (g.id)}
 					<div class="flex items-start gap-2">
 						<span class="display mt-3 w-5 shrink-0 text-right text-[15px] leading-none"
 							style="color:{g.card_pick ? '#f2c14e' : 'var(--dim)'}">{i + 1}</span>
