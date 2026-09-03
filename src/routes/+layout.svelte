@@ -2,23 +2,24 @@
 	import '../app.css';
 	import { page } from '$app/state';
 	let { children, data } = $props();
-	const nav = [['/', 'Picks'], ['/standings', 'Standings']];
+	const nav = [['/', 'PICKS'], ['/standings', 'STANDINGS']];
 </script>
 
-<div class="min-h-screen bg-[#0a0a0c] text-neutral-200 antialiased">
+<div class="min-h-screen antialiased">
 	{#if data.player}
-		<header class="border-b border-white/10">
-			<div class="mx-auto flex max-w-3xl items-center gap-4 px-4 py-3">
-				<span class="text-sm font-semibold tracking-tight text-white">CFB Pick'em</span>
+		<header class="border-b" style="border-color:var(--edge)">
+			<div class="mx-auto flex max-w-2xl items-center gap-3 px-3 py-2.5">
+				<span class="display text-[15px] leading-none text-white">PICK<span style="color:var(--hot)">'</span>EM</span>
 				<nav class="flex gap-1">
 					{#each nav as [href, label]}
-						<a {href} aria-current={page.url.pathname === href ? 'page' : undefined}
-							class="rounded-lg px-2.5 py-1 text-xs transition-colors
-								{page.url.pathname === href ? 'bg-white/10 text-white' : 'text-neutral-500 hover:text-white'}">{label}</a>
+						{@const on = page.url.pathname === href}
+						<a {href} aria-current={on ? 'page' : undefined}
+							class="cond border px-2.5 py-1 text-[13px] font-bold tracking-[0.12em] transition-colors"
+							style="border-color:{on ? '#fff' : 'transparent'};color:{on ? '#fff' : '#7e879c'}">{label}</a>
 					{/each}
 				</nav>
 				<form method="POST" action="/logout" class="ml-auto">
-					<button class="text-xs text-neutral-500 hover:text-white">{data.player.name} · sign out</button>
+					<button class="cond text-[13px] tracking-wider" style="color:#5b6478">{data.player.name} · OUT</button>
 				</form>
 			</div>
 		</header>

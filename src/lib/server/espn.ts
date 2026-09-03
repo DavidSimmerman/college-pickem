@@ -1,4 +1,10 @@
 import { db } from './db';
+import { dominantColor, visibleFraction } from './logo-color';
+import { hasHue, teamBg, teamTint } from '$lib/colors';
+
+// Share of a logo's solid pixels that must read against its background before we leave
+// it bare. Below this the mark is painted in the colour behind it and needs an outline.
+const HALO_BELOW = 0.35;
 
 const API = 'https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard';
 
@@ -33,14 +39,17 @@ export async function scrapeWeek(ref?: WeekRef): Promise<{ ref: WeekRef; games: 
 
 	const upsert = db.prepare(`
     INSERT INTO games (id, season, week, start, state, detail,
-      home_abbr, home_name, home_logo, home_rank, home_score,
-      away_abbr, away_name, away_logo, away_rank, away_score,
+      home_abbr, home_name, home_logo, home_rank, home_score, home_conf, home_color, home_alt_color,
+      away_abbr, away_name, away_logo, away_rank, away_score, away_conf, away_color, away_alt_color,
       spread, ml_home, ml_away, over_under, venue, tv, odds_frozen, updated_at)
-    VALUES (?,?,?,?,?,?, ?,?,?,?,?, ?,?,?,?,?, ?,?,?,?,?,?,?, datetime('now'))
+    VALUES (?,?,?,?,?,?, ?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?, datetime('now'))
     ON CONFLICT(id) DO UPDATE SET
       start=excluded.start, state=excluded.state, detail=excluded.detail,
       home_rank=excluded.home_rank, home_score=excluded.home_score,
       away_rank=excluded.away_rank, away_score=excluded.away_score,
+      home_conf=excluded.home_conf, away_conf=excluded.away_conf,
+      home_color=excluded.home_color, away_color=excluded.away_color,
+      home_alt_color=excluded.home_alt_color, away_alt_color=excluded.away_alt_color,
       tv=excluded.tv, updated_at=datetime('now'),
       -- only overwrite the price while the game has not started
       spread     = CASE WHEN games.odds_frozen = 1 THEN games.spread     ELSE COALESCE(excluded.spread, games.spread) END,
@@ -72,7 +81,10 @@ export async function scrapeWeek(ref?: WeekRef): Promise<{ ref: WeekRef; games: 
 			t.team?.shortDisplayName ?? t.team?.displayName ?? '?',
 			t.team?.logo ?? null,
 			t.curatedRank?.current ?? 99,
-			live ? num(t.score) : null
+			live ? num(t.score) : null,
+			num(t.team?.conferenceId),
+			t.team?.color ? `#${t.team.color}` : null,
+			t.team?.alternateColor ? `#${t.team.alternateColor}` : null
 		];
 
 		upsert.run(
@@ -83,7 +95,61 @@ export async function scrapeWeek(ref?: WeekRef): Promise<{ ref: WeekRef; games: 
 			live ? 1 : 0
 		);
 	}
+	await backfillLogoColors();
 	return { ref: { season, week }, games: events.length, priced };
+}
+
+/**
+ * Work out, once per team, how its logo should be drawn. Two things come out of the
+ * same download: a colour for the schools ESPN files as flat #000000, and whether the
+ * logo needs an outline to read on the colour it gets painted on — many do, because
+ * ESPN derives a team's colour from its own logo. The logo itself is never recoloured.
+ */
+async function backfillLogoColors(): Promise<void> {
+	const rows = db
+		.prepare(
+			`SELECT DISTINCT logo, color, alt FROM (
+         SELECT home_logo AS logo, home_color AS color, home_alt_color AS alt FROM games
+         UNION SELECT away_logo, away_color, away_alt_color FROM games)
+       WHERE logo IS NOT NULL`
+		)
+		.all() as { logo: string; color: string | null; alt: string | null }[];
+
+	const cached = new Map(
+		(
+			db.prepare('SELECT logo, color, bg FROM logo_colors').all() as {
+				logo: string;
+				color: string | null;
+				bg: string | null;
+			}[]
+		).map((r) => [r.logo, r])
+	);
+	const save = db.prepare(
+		'INSERT OR REPLACE INTO logo_colors (logo, color, bg, halo_on, halo_off) VALUES (?, ?, ?, ?, ?)'
+	);
+
+	let done = 0;
+	let haloed = 0;
+	for (const r of rows) {
+		// A team's colours barely ever change, so only re-measure when they do.
+		const prev = cached.get(r.logo);
+		if (prev && prev.bg === teamBg(r.color, r.alt, prev.color)) continue;
+		try {
+			const res = await fetch(r.logo);
+			if (!res.ok) continue; // transient: stay uncached so the next scrape retries
+			const png = Buffer.from(await res.arrayBuffer());
+			const derived = hasHue(r.color) || hasHue(r.alt) ? null : dominantColor(png);
+			const bg = teamBg(r.color, r.alt, derived);
+			const on = visibleFraction(png, bg) < HALO_BELOW;
+			const off = visibleFraction(png, teamTint(bg)) < HALO_BELOW;
+			save.run(r.logo, derived, bg, on ? 1 : 0, off ? 1 : 0);
+			done++;
+			if (on) haloed++;
+		} catch {
+			// a failed fetch should not poison the cache
+		}
+	}
+	if (done) console.log(`[espn] measured ${done} logo(s); ${haloed} need an outline when picked`);
 }
 
 /** Any game currently in progress, or kicking off within the next 15 minutes. */
