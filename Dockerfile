@@ -16,8 +16,6 @@ ENV NODE_ENV=production
 COPY --from=build /app/build ./build
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/package.json ./
-COPY --from=build /app/scripts ./scripts
-COPY --from=build /app/src/lib/server/db.ts ./src/lib/server/db.ts
 # adapter-node listens here; Coolify maps its proxy to it.
 EXPOSE 3000
 ENV PORT=3000 HOST=0.0.0.0

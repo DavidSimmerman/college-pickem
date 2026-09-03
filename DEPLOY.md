@@ -1,14 +1,16 @@
 # Deploying to Coolify behind a Cloudflare tunnel
 
-Seven steps. Do them in order; each one is finished before the next begins.
+Six steps. Do them in order; each one is finished before the next begins.
 
 1. Create the Postgres database in Coolify
 2. Create the application, pointed at this repo
 3. Set the environment variables
-4. Deploy, and confirm the schema created itself
-5. Import your old SQLite data (skip if this is a fresh league)
-6. Point a Cloudflare tunnel at it
-7. Add Google sign-in (optional)
+4. Deploy, and watch it fill itself in
+5. Point a Cloudflare tunnel at it
+6. Add Google sign-in (optional)
+
+There is nothing to seed and nothing to migrate. The schema creates itself on first
+boot and the poller pulls the current week from ESPN a moment later.
 
 ---
 
@@ -54,49 +56,37 @@ Under the application's **Environment Variables**:
 | `DATABASE_SSL` | `false` |
 
 `ORIGIN` has to match exactly — scheme included, no trailing slash. SvelteKit compares
-it against the `Origin` header on every form post, so a mismatch means sign-in silently
-fails with a 403 and nothing else looks wrong.
+it against the `Origin` header on every form post, so a mismatch means sign-in fails
+with a 403 while everything else looks fine.
 
-Leave `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` unset for now. Step 7 adds them.
+Leave `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` unset for now. Step 6 adds them.
 
 ## 4. Deploy
 
-Hit **Deploy** and watch the logs. You are looking for two lines:
+Hit **Deploy** and watch the logs. Four lines, in this order:
 
 ```
 [db] schema ready
 Listening on http://0.0.0.0:3000
-```
-
-The schema creates itself on first boot — there is no migration step to run. A minute
-or so later the scraper reports in:
-
-```
 [espn] wk1 99 games, 91 priced
+[espn] measured 186 logo(s); 81 need an outline when picked
 ```
 
-If the database URL is wrong, the container exits immediately with `DATABASE_URL is not
-set` or a connection error, rather than starting and failing later.
+The first two arrive immediately. The third is the poller's first pass at ESPN. The
+fourth takes a minute or two — it downloads each team's logo once to work out how to
+draw it, then never fetches it again.
 
-## 5. Import your old data
+The Games of the Week board is chosen the first time somebody signed in loads the page,
+once ten games have a moneyline — not during the scrape. So on a brand new deployment
+the first person to create an account is also the one who sets the week's board. Before
+that the tab says the week's games are not set yet, which is the correct thing for it to
+say.
 
-Only if you are moving an existing league across. From this machine, with the SQLite
-file in hand and the Postgres URL reachable:
+A wrong database URL fails loudly and immediately: the container exits with
+`DATABASE_URL is not set` or a connection error rather than starting and misbehaving
+later.
 
-```sh
-DATABASE_URL='postgres://...' \
-  node --experimental-strip-types scripts/import-sqlite.ts data/pickem.db
-```
-
-It prints a row count per table. Every insert is `ON CONFLICT DO NOTHING`, so running it
-twice is harmless, and it only ever inserts — it cannot overwrite or delete anything
-already in Postgres.
-
-If Coolify's Postgres is not reachable from outside, run it from a terminal inside the
-app container instead (**Coolify → application → Terminal**), after uploading the
-`.db` file there.
-
-## 6. Point the Cloudflare tunnel at it
+## 5. Point the Cloudflare tunnel at it
 
 In **Cloudflare Zero Trust → Networks → Tunnels**, either use your existing tunnel or
 create one. Add a public hostname:
@@ -111,13 +101,13 @@ create one. Add a public hostname:
 Use the container name and internal port, the same way the database URL does. The app
 never needs a published port on the host, and nothing has to be opened on your router.
 
-If `cloudflared` runs on the host rather than in Coolify's network, point it at
+If `cloudflared` runs on the host rather than inside Coolify's network, point it at
 `http://localhost:<the port Coolify published>` instead — Coolify shows that port on the
 application page.
 
 Whatever hostname you choose here has to equal `ORIGIN` from step 3.
 
-## 7. Google sign-in (optional)
+## 6. Google sign-in (optional)
 
 At <https://console.cloud.google.com/apis/credentials>:
 
@@ -143,8 +133,8 @@ the database's **Backups** tab. Nothing in the application container is worth ke
 it can be rebuilt from the repo at any time.
 
 **Updating.** Push to `main`. If you enabled automatic deployments Coolify redeploys on
-its own; otherwise hit Deploy. The schema statements are all `IF NOT EXISTS`, so a
-redeploy against a populated database is a no-op.
+its own; otherwise hit Deploy. Every schema statement is `IF NOT EXISTS`, so a redeploy
+against a populated database is a no-op — accounts and picks are untouched.
 
 **Scaling.** The ESPN poller runs inside the server process, so run exactly one
 instance. Two containers would poll ESPN twice and race each other on writes. For a

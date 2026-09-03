@@ -76,13 +76,10 @@ cp .env.example .env                  # then fill in DATABASE_URL
 pnpm dev                              # http://localhost:5192
 ```
 
-The schema creates itself on first boot. Coming from the old SQLite build, import it:
-
-```sh
-DATABASE_URL=postgres://... node --experimental-strip-types scripts/import-sqlite.ts data/pickem.db
-```
-
-That import is idempotent — running it twice changes nothing the second time.
+The schema creates itself on first boot, and so does the data: the poller pulls the
+current week from ESPN within a minute of starting, measures the logos it has not seen,
+and freezes a Games of the Week board once ten games have a line. There is nothing to
+seed.
 
 ## Signing in
 
