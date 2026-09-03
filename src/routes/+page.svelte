@@ -1,12 +1,13 @@
 <script lang="ts">
 	import { lineFor, mlWin, mlLose, mlDead, fmtOdds, fmtPts, mlPoints, gradeSpread, gradeMl, type Side } from '$lib/scoring';
 	import { confRank } from '$lib/conferences';
+	import { slateScore } from '$lib/slate';
 	import { teamBg, inkOn, haloFilter, TINT } from '$lib/colors';
 	import { invalidateAll } from '$app/navigation';
 
 	let { data } = $props();
 
-	let mode = $state<'spread' | 'ml' | 'slate'>('spread');
+	let mode = $state<'spread' | 'ml' | 'slate'>('slate');
 	let games = $state(data.games);
 	let slate = $state(data.slate);
 	let watched = $state(new Set(data.watched));
@@ -14,7 +15,8 @@
 	let submitting = $state(false);
 
 	let q = $state('');
-	let groupBy = $state<'conf' | 'top25' | 'time'>('conf');
+	let groupBy = $state<'top25' | 'conf' | 'all'>('top25');
+	let sortBy = $state<'time' | 'close' | 'score'>('time');
 	let band = $state<'all' | 'close' | 'mid' | 'blowout'>('all');
 	let watchedOnly = $state(false);
 
@@ -28,8 +30,6 @@
 		new Date(iso)
 			.toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' })
 			.replace(':00 ', ' ');
-	const day = (iso: string) =>
-		new Date(iso).toLocaleString('en-US', { weekday: 'long', timeZone: 'America/New_York' });
 
 	async function pick(g: any, side: Side) {
 		if (g.locked || deadSide(g, side)) return;
@@ -120,21 +120,45 @@
 		})
 	);
 
+	/**
+	 * Order inside a group. A finished game has nothing left to decide, so it sinks to
+	 * the bottom whatever the sort — you are here to make picks, not read box scores.
+	 * `id` breaks remaining ties so the order never wobbles between renders.
+	 */
+	const order = (list: any[]) =>
+		[...list].sort(
+			(a, z) =>
+				(a.state === 'post' ? 1 : 0) - (z.state === 'post' ? 1 : 0) ||
+				(sortBy === 'close'
+					? Math.abs(a.spread ?? 999) - Math.abs(z.spread ?? 999)
+					: sortBy === 'score'
+						? slateScore(z) - slateScore(a)
+						: a.start < z.start ? -1 : a.start > z.start ? 1 : 0) ||
+				(a.id < z.id ? -1 : 1)
+		);
+
 	const groups = $derived.by(() => {
+		// ALL is deliberately flat: one list, no headings, nothing to expand.
+		if (groupBy === 'all') return [['All games', order(shown)]] as [string, any[]][];
+
 		const m = new Map<string, any[]>();
 		const add = (k: string, g: any) => (m.get(k) ?? m.set(k, []).get(k)!).push(g);
 		for (const g of shown) {
 			if (watched.has(g.home_abbr) || watched.has(g.away_abbr)) add('My teams', g);
-			add(groupBy === 'conf' ? g.conf : groupBy === 'top25' ? (g.top25 ? 'Top 25' : 'The rest') : day(g.start), g);
+			// TOP 25 shows ranked games and stops there — an "everything else" bucket is
+			// just the whole board again, which is what ALL is for.
+			if (groupBy === 'top25') {
+				if (g.top25) add('Top 25', g);
+			} else add(g.conf, g);
 		}
 		const mine = m.get('My teams');
 		m.delete('My teams');
 		const rest = [...m.entries()];
-		if (groupBy === 'top25') rest.sort((a) => (a[0] === 'Top 25' ? -1 : 1));
-		else if (groupBy === 'conf')
+		if (groupBy === 'conf')
 			// strongest league first, then bigger slate as the tiebreak among equals
 			rest.sort((a, z) => confRank(a[0]) - confRank(z[0]) || z[1].length - a[1].length);
-		return (mine?.length ? [['My teams', mine], ...rest] : rest) as [string, any[]][];
+		const all = mine?.length ? [['My teams', mine], ...rest] : rest;
+		return all.map(([name, list]) => [name, order(list as any[])]) as [string, any[]][];
 	});
 
 	// Accordion state lives here, not in the DOM. `open={...}` is one-way: picking a
@@ -171,8 +195,14 @@
 			? gradeSpread(g.spread_pick, g.spread_at ?? g.spread, g.home_score, g.away_score)
 			: gradeMl(pickOn(g), g.home_score, g.away_score);
 
+	/** Open or shut every group at once. Writing each name explicitly beats a global
+	 *  flag: a later filter change adds groups that then follow the default again. */
+	const setAll = (open: boolean) =>
+		(openChoice = Object.fromEntries(groups.map(([name]) => [name, open])));
+
 	const BANDS = [['all', 'ALL'], ['close', '≤3'], ['mid', '3–10'], ['blowout', '10+']] as const;
-	const GROUPS = [['conf', 'CONF'], ['top25', 'TOP 25'], ['time', 'DAY']] as const;
+	const GROUPS = [['top25', 'TOP 25'], ['conf', 'CONF'], ['all', 'ALL']] as const;
+	const SORTS = [['time', 'TIME'], ['close', 'CLOSE'], ['score', 'SCORE']] as const;
 </script>
 
 <svelte:head><title>Week {data.week} — CFB Pick'em</title></svelte:head>
@@ -254,6 +284,14 @@
 			{/each}
 		</div>
 		<div class="flex items-stretch gap-1.5">
+			<span class="chiplabel">SORT</span>
+			{#each SORTS as [k, label]}
+				<button onclick={() => (sortBy = k)} aria-pressed={sortBy === k} class="chip flex-1"
+					title={k === 'time' ? 'Kickoff order' : k === 'close' ? 'Tightest line first' : 'Best game first, ranked the same way as Games of the Week'}
+				>{label}</button>
+			{/each}
+		</div>
+		<div class="flex items-stretch gap-1.5">
 			<span class="chiplabel">LINE</span>
 			{#each BANDS as [k, label]}
 				<button onclick={() => (band = k)} aria-pressed={band === k} class="chip flex-1">{label}</button>
@@ -261,6 +299,13 @@
 			<button onclick={() => (watchedOnly = !watchedOnly)} aria-pressed={watchedOnly} class="chip star"
 				aria-label="Only my teams">★ {watched.size}</button>
 		</div>
+		{#if groupBy !== 'all'}
+			<div class="flex items-stretch gap-1.5">
+				<span class="chiplabel">ALL</span>
+				<button onclick={() => setAll(true)} class="chip flex-1">EXPAND</button>
+				<button onclick={() => setAll(false)} class="chip flex-1">COLLAPSE</button>
+			</div>
+		{/if}
 	</div>
 
 	<!-- One game, shared by the grouped board and Games of the Week. -->
@@ -399,6 +444,16 @@
 		</div>
 	{:else}
 	<div class="space-y-3">
+		{#if groupBy === 'all'}
+			<!-- ALL is a flat board: no heading, no accordion, nothing to collapse. -->
+			{#each groups[0]?.[1] ?? [] as g (g.id)}
+				{@render gameCard(g)}
+			{:else}
+				<p class="cond py-16 text-center text-[15px] tracking-wider" style="color:var(--dim)">
+					{#if q || band !== 'all' || watchedOnly}NOTHING MATCHES THAT FILTER.{:else}NO GAMES LOADED FOR THIS WEEK YET.{/if}
+				</p>
+			{/each}
+		{:else}
 		{#each groups as [name, list] (name)}
 			<details bind:open={() => isOpen(name), (v) => (openChoice[name] = v)} class="grp">
 				<summary class="flex items-center gap-2 border-b-2 pb-2" style="border-color:var(--edge)">
@@ -417,6 +472,7 @@
 				{#if q || band !== 'all' || watchedOnly}NOTHING MATCHES THAT FILTER.{:else}NO GAMES LOADED FOR THIS WEEK YET.{/if}
 			</p>
 		{/each}
+		{/if}
 	</div>
 	{/if}
 </div>

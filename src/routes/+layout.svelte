@@ -2,7 +2,7 @@
 	import '../app.css';
 	import { page } from '$app/state';
 	let { children, data } = $props();
-	const nav = [['/', 'PICKS'], ['/standings', 'STANDINGS']];
+	const nav = [['/', 'PICKS'], ['/me', 'MY PICKS'], ['/standings', 'STANDINGS']];
 </script>
 
 <div class="min-h-screen antialiased">
