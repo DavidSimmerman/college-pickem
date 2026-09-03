@@ -95,6 +95,17 @@ CREATE TABLE IF NOT EXISTS picks (
 );
 `);
 
+// Google sign-in. `pass` is NOT NULL and SQLite cannot relax that in place, so an
+// account created through Google gets an unguessable random passcode instead — the
+// password form can never match it, which is exactly what we want.
+const pcols = new Set(
+	(db.prepare('PRAGMA table_info(players)').all() as { name: string }[]).map((c) => c.name)
+);
+for (const [name, type] of [['google_sub', 'TEXT'], ['email', 'TEXT']] as const) {
+	if (!pcols.has(name)) db.exec(`ALTER TABLE players ADD COLUMN ${name} ${type}`);
+}
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS players_google ON players(google_sub) WHERE google_sub IS NOT NULL');
+
 // Additive migration: SQLite has no "ADD COLUMN IF NOT EXISTS", so probe and add.
 const cols = new Set(
 	(db.prepare('PRAGMA table_info(games)').all() as { name: string }[]).map((c) => c.name)

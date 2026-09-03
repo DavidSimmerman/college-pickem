@@ -1,6 +1,7 @@
 import { redirect } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
 import { gradeSpread, gradeMl, mlPoints, type Side, type Outcome } from '$lib/scoring';
+import { configured } from '$lib/server/google';
 import type { PageServerLoad } from './$types';
 
 type Tally = { w: number; l: number; t: number; pts: number };
@@ -118,9 +119,14 @@ export const load: PageServerLoad = ({ locals, url }) => {
 		};
 	};
 
+	const linked = !!(
+		db.prepare('SELECT google_sub FROM players WHERE id = ?').get(me) as { google_sub: string | null }
+	)?.google_sub;
+
 	return {
 		season,
 		week,
+		google: { available: configured(), linked },
 		weeks: (db.prepare('SELECT DISTINCT week FROM games WHERE season = ? ORDER BY week').all(season) as {
 			week: number;
 		}[]).map((w) => w.week),

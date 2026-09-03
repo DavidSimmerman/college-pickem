@@ -88,6 +88,19 @@ export const load: PageServerLoad = ({ locals }) => {
 		else if (o === 'loss') e.l++;
 	}
 
+	// Games of the Week gets its own board: it is the headline mode, it is win/loss, and
+	// folding it into a points column buried it.
+	const gotw = [...cards.entries()]
+		.map(([id, v]) => ({
+			id,
+			name: (rows.find((r) => r.player_id === id)?.name ??
+				(db.prepare('SELECT name FROM players WHERE id = ?').get(id) as { name: string } | undefined)?.name ??
+				'—') as string,
+			w: v.w, l: v.l,
+			pct: v.w + v.l ? v.w / (v.w + v.l) : 0
+		}))
+		.sort((a, b) => b.w - a.w || b.pct - a.pct);
+
 	const players = [...board.entries()]
 		.map(([id, v]) => ({
 			id, ...v,
@@ -100,5 +113,5 @@ export const load: PageServerLoad = ({ locals }) => {
 		// carries no points of its own.
 		.sort((a, b) => b.ml - a.ml || b.gotwW - a.gotwW || b.pct - a.pct);
 
-	return { players, ledger: ledger.reverse(), me: locals.player.id };
+	return { players, gotw, ledger: ledger.reverse(), me: locals.player.id };
 };

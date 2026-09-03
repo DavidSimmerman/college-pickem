@@ -10,6 +10,41 @@
 <svelte:head><title>Standings — CFB Pick'em</title></svelte:head>
 
 <div class="mx-auto max-w-3xl space-y-6 px-4 py-6">
+	<!-- Games of the Week leads: it is the headline mode, and a win/loss record does not
+	     belong buried in a column of a points table. -->
+	<section>
+		<h2 class="mb-3 font-mono text-[10px] uppercase tracking-widest" style="color:#f2c14e">Games of the week</h2>
+		<div class="overflow-hidden rounded-xl border border-white/10 bg-white/[0.02]">
+			<table class="w-full text-sm">
+				<caption class="sr-only">Games of the Week standings, ranked by wins</caption>
+				<thead>
+					<tr class="border-b border-white/10 font-mono text-[10px] uppercase tracking-wider text-neutral-600">
+						<th scope="col" class="px-3 py-2 text-left font-normal">#</th>
+						<th scope="col" class="py-2 text-left font-normal">Player</th>
+						<th scope="col" class="py-2 text-right font-normal">Record</th>
+						<th scope="col" class="px-3 py-2 text-right font-normal">Win%</th>
+					</tr>
+				</thead>
+				<tbody>
+					{#each data.gotw as p, i}
+						<tr class="border-b border-white/5 last:border-0 {p.id === data.me ? 'bg-white/[0.04]' : ''}">
+							<td class="px-3 py-2.5 font-mono text-xs text-neutral-600">{i + 1}</td>
+							<td class="py-2.5 {i === 0 ? 'font-medium text-white' : 'text-neutral-300'}">{p.name}</td>
+							<td class="py-2.5 text-right font-mono text-sm tabular-nums text-neutral-300">{p.w}-{p.l}</td>
+							<td class="px-3 py-2.5 text-right font-mono text-sm tabular-nums"
+								style="color:{p.pct >= 0.6 ? 'var(--ok)' : p.pct < 0.4 ? 'var(--bad)' : '#9099ad'}"
+							>{(p.pct * 100).toFixed(0)}%</td>
+						</tr>
+					{:else}
+						<tr><td colspan="4" class="px-3 py-8 text-center text-xs text-neutral-500">
+							No submitted cards graded yet — this fills in once the week's games go final.
+						</td></tr>
+					{/each}
+				</tbody>
+			</table>
+		</div>
+	</section>
+
 	<section>
 		<h2 class="mb-3 font-mono text-[10px] uppercase tracking-widest text-neutral-500">Leaderboard</h2>
 		<div class="overflow-hidden rounded-xl border border-white/10 bg-white/[0.02]">

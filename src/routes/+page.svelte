@@ -16,7 +16,7 @@
 
 	let q = $state('');
 	let groupBy = $state<'top25' | 'conf' | 'all'>('top25');
-	let sortBy = $state<'time' | 'close' | 'score'>('time');
+	let sortBy = $state<'time' | 'close' | 'best'>('time');
 	let band = $state<'all' | 'close' | 'mid' | 'blowout'>('all');
 	let watchedOnly = $state(false);
 
@@ -131,7 +131,7 @@
 				(a.state === 'post' ? 1 : 0) - (z.state === 'post' ? 1 : 0) ||
 				(sortBy === 'close'
 					? Math.abs(a.spread ?? 999) - Math.abs(z.spread ?? 999)
-					: sortBy === 'score'
+					: sortBy === 'best'
 						? slateScore(z) - slateScore(a)
 						: a.start < z.start ? -1 : a.start > z.start ? 1 : 0) ||
 				(a.id < z.id ? -1 : 1)
@@ -202,7 +202,7 @@
 
 	const BANDS = [['all', 'ALL'], ['close', '≤3'], ['mid', '3–10'], ['blowout', '10+']] as const;
 	const GROUPS = [['top25', 'TOP 25'], ['conf', 'CONF'], ['all', 'ALL']] as const;
-	const SORTS = [['time', 'TIME'], ['close', 'CLOSE'], ['score', 'SCORE']] as const;
+	const SORTS = [['time', 'TIME'], ['close', 'CLOSE'], ['best', 'BEST']] as const;
 </script>
 
 <svelte:head><title>Week {data.week} — CFB Pick'em</title></svelte:head>
@@ -225,7 +225,7 @@
 	<!-- mode: spreads, moneyline, or the weekly card -->
 	<div class="sticky top-0 z-30 -mx-3 mb-3 px-3 pb-2 pt-2 backdrop-blur-md" style="background:color-mix(in oklab, var(--bg) 88%, transparent)">
 		<div class="flex gap-[3px]">
-			{#each [['spread', 'SPREADS', spreadCount, 'var(--hot)'], ['ml', 'MONEYLINE', mlPicks.length, 'var(--led)'], ['slate', 'GAMES OF THE WEEK', slate.frozen ? slate.filled : 0, '#f2c14e']] as const as [m, label, n, hue]}
+			{#each [['slate', 'GAMES OF THE WEEK', slate.frozen ? slate.filled : 0, '#f2c14e'], ['spread', 'SPREADS', spreadCount, 'var(--hot)'], ['ml', 'MONEYLINE', mlPicks.length, 'var(--led)']] as const as [m, label, n, hue]}
 				<button onclick={() => (mode = m)} aria-pressed={mode === m}
 					class="slant cond h-10 flex-1 border text-[13px] font-bold tracking-[0.12em] transition-colors"
 					style="border-color:{mode === m ? 'transparent' : 'var(--edge)'};
@@ -287,7 +287,7 @@
 			<span class="chiplabel">SORT</span>
 			{#each SORTS as [k, label]}
 				<button onclick={() => (sortBy = k)} aria-pressed={sortBy === k} class="chip flex-1"
-					title={k === 'time' ? 'Kickoff order' : k === 'close' ? 'Tightest line first' : 'Best game first, ranked the same way as Games of the Week'}
+					title={k === 'time' ? 'Kickoff order' : k === 'close' ? 'Tightest line first' : 'Best games first, ranked the same way as Games of the Week'}
 				>{label}</button>
 			{/each}
 		</div>
