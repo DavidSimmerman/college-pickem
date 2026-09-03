@@ -22,6 +22,7 @@
 						<th scope="col" class="py-2 text-right font-normal">ATS</th>
 						<th scope="col" class="py-2 text-right font-normal">Win%</th>
 						<th scope="col" class="py-2 text-right font-normal">ML</th>
+						<th scope="col" class="py-2 text-right font-normal">Card</th>
 						<th scope="col" class="px-3 py-2 text-right font-normal">Points</th>
 					</tr>
 				</thead>
@@ -33,10 +34,11 @@
 							<td class="py-2.5 text-right font-mono text-xs text-neutral-400">{p.w}-{p.l}{p.t ? `-${p.t}` : ''}</td>
 							<td class="py-2.5 text-right font-mono text-xs text-neutral-500">{p.w + p.l ? (p.pct * 100).toFixed(0) + '%' : '—'}</td>
 							<td class="py-2.5 text-right font-mono text-xs text-neutral-500">{p.mlW}-{p.mlL}</td>
-							<td class="px-3 py-2.5 text-right font-mono text-sm tabular-nums {p.ml > 0 ? 'text-emerald-400' : p.ml < 0 ? 'text-red-400' : 'text-neutral-500'}">{sgn(p.ml)}</td>
+							<td class="py-2.5 text-right font-mono text-xs text-neutral-500">{p.cardW + p.cardL ? `${p.cardW}-${p.cardL}` : '—'}</td>
+							<td class="px-3 py-2.5 text-right font-mono text-sm tabular-nums {p.ml + p.card > 0 ? 'text-emerald-400' : p.ml + p.card < 0 ? 'text-red-400' : 'text-neutral-500'}">{sgn(p.ml + p.card)}</td>
 						</tr>
 					{:else}
-						<tr><td colspan="6" class="px-3 py-8 text-center text-xs text-neutral-500">Nothing graded yet — standings fill in as games go final.</td></tr>
+						<tr><td colspan="7" class="px-3 py-8 text-center text-xs text-neutral-500">Nothing graded yet — standings fill in as games go final.</td></tr>
 					{/each}
 				</tbody>
 			</table>

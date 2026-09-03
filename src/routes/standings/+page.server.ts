@@ -65,13 +65,41 @@ export const load: PageServerLoad = ({ locals }) => {
 		}
 	}
 
+	// Card points sit apart from the free-pick modes: only a submitted card counts, so a
+	// half-filled one is worth nothing however good the picks in it look.
+	const cardRows = db
+		.prepare(
+			`SELECT sp.player_id, p.name, sp.side, sp.odds_at, g.home_score, g.away_score
+       FROM slate_picks sp
+       JOIN players p ON p.id = sp.player_id
+       JOIN games g   ON g.id = sp.game_id
+       JOIN slate s   ON s.game_id = sp.game_id
+       JOIN slate_submits sub
+         ON sub.player_id = sp.player_id AND sub.season = s.season AND sub.week = s.week
+       WHERE g.state = 'post' AND g.home_score IS NOT NULL`
+		)
+		.all() as { player_id: number; name: string; side: Side; odds_at: number | null;
+                home_score: number; away_score: number }[];
+
+	const cards = new Map<number, { pts: number; w: number; l: number }>();
+	for (const r of cardRows) {
+		const e = cards.get(r.player_id) ?? cards.set(r.player_id, { pts: 0, w: 0, l: 0 }).get(r.player_id)!;
+		const o = gradeMl(r.side, r.home_score, r.away_score);
+		e.pts += mlPoints(o, r.odds_at);
+		if (o === 'win') e.w++;
+		else if (o === 'loss') e.l++;
+	}
+
 	const players = [...board.entries()]
 		.map(([id, v]) => ({
 			id, ...v,
 			pct: v.w + v.l ? v.w / (v.w + v.l) : 0,
+			card: cards.get(id)?.pts ?? 0,
+			cardW: cards.get(id)?.w ?? 0,
+			cardL: cards.get(id)?.l ?? 0,
 			byWeek: [...v.byWeek.entries()].sort((a, b) => a[0] - b[0])
 		}))
-		.sort((a, b) => b.ml - a.ml || b.pct - a.pct);
+		.sort((a, b) => b.ml + b.card - (a.ml + a.card) || b.pct - a.pct);
 
 	return { players, ledger: ledger.reverse(), me: locals.player.id };
 };

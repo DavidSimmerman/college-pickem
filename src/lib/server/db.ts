@@ -52,6 +52,36 @@ CREATE TABLE IF NOT EXISTS watches (
   team       TEXT NOT NULL,
   PRIMARY KEY (player_id, team)
 );
+-- The frozen picks-of-the-week card. Computed once and never recomputed: lines move
+-- all week, and a slate that reshuffled under a card someone had already filled in
+-- would orphan their picks.
+CREATE TABLE IF NOT EXISTS slate (
+  season    INTEGER NOT NULL,
+  week      INTEGER NOT NULL,
+  game_id   TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+  seed      INTEGER NOT NULL,       -- 1 = the best game on the card
+  frozen_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (season, week, game_id)
+);
+-- Card picks live in their own table because they obey different rules: one per game,
+-- no kind, and worthless until the whole card is submitted.
+CREATE TABLE IF NOT EXISTS slate_picks (
+  player_id  INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  game_id    TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+  side       TEXT NOT NULL CHECK (side IN ('home','away')),
+  odds_at    INTEGER,               -- price locked in at pick time
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (player_id, game_id)
+);
+-- A card is all or nothing. Until this row exists the picks are a draft, and a draft
+-- scores nothing however good it looks.
+CREATE TABLE IF NOT EXISTS slate_submits (
+  player_id    INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  season       INTEGER NOT NULL,
+  week         INTEGER NOT NULL,
+  submitted_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (player_id, season, week)
+);
 CREATE TABLE IF NOT EXISTS picks (
   player_id  INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
   game_id    TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,

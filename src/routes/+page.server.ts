@@ -2,6 +2,7 @@ import { redirect } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
 import { scrapeWeek } from '$lib/server/espn';
 import { confName } from '$lib/conferences';
+import { getCard } from '$lib/server/slate';
 import type { PageServerLoad } from './$types';
 
 /** Week of the next kickoff, falling back to the latest week we have. */
@@ -67,5 +68,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		db.prepare('SELECT team FROM watches WHERE player_id = ?').all(locals.player.id) as { team: string }[]
 	).map((w) => w.team);
 
-	return { games, week, season, weeks: weeks.map((w) => w.week), current: cur.week, watched };
+	return {
+		games, week, season, weeks: weeks.map((w) => w.week), current: cur.week, watched,
+		card: getCard(locals.player.id, season, week)
+	};
 };

@@ -1,5 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
+import { mlDead } from '$lib/scoring';
 import type { RequestHandler } from './$types';
 
 /** Toggle a single pick. Locks are enforced here, never trusted from the client. */
@@ -20,7 +21,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	if (g.state !== 'pre' || g.started) error(409, 'game has started');
 
 	const price = kind === 'ml' ? (side === 'home' ? g.ml_home : g.ml_away) : g.spread;
-	if (side !== null && (price === null || (kind === 'ml' && price === 0))) error(409, 'no line posted yet');
+	if (side !== null && price === null) error(409, 'no line posted yet');
+	// A side that pays nothing for a correct pick is pure downside; the UI greys it out
+	// and the server refuses it, so a hand-rolled request cannot bank a free -RISK.
+	if (side !== null && kind === 'ml' && mlDead(price)) error(409, 'that side pays nothing');
 
 	if (side === null) {
 		db.prepare('DELETE FROM picks WHERE player_id = ? AND game_id = ? AND kind = ?').run(

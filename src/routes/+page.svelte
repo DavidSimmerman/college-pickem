@@ -1,15 +1,17 @@
 <script lang="ts">
-	import { lineFor, mlWin, mlLose, fmtOdds, mlPoints, gradeSpread, gradeMl, type Side } from '$lib/scoring';
+	import { lineFor, mlWin, mlLose, mlDead, fmtOdds, fmtPts, mlPoints, gradeSpread, gradeMl, type Side } from '$lib/scoring';
 	import { confRank } from '$lib/conferences';
 	import { teamBg, inkOn, haloFilter, TINT } from '$lib/colors';
 	import { invalidateAll } from '$app/navigation';
 
 	let { data } = $props();
 
-	let mode = $state<'spread' | 'ml'>('spread');
+	let mode = $state<'spread' | 'ml' | 'card'>('spread');
 	let games = $state(data.games);
+	let card = $state(data.card);
 	let watched = $state(new Set(data.watched));
 	let err = $state('');
+	let submitting = $state(false);
 
 	let q = $state('');
 	let groupBy = $state<'conf' | 'top25' | 'time'>('conf');
@@ -18,6 +20,7 @@
 
 	$effect(() => {
 		games = data.games;
+		card = data.card;
 		watched = new Set(data.watched);
 	});
 
@@ -29,7 +32,8 @@
 		new Date(iso).toLocaleString('en-US', { weekday: 'long', timeZone: 'America/New_York' });
 
 	async function pick(g: any, side: Side) {
-		if (g.locked) return;
+		if (g.locked || deadSide(g, side)) return;
+		if (mode === 'card') return cardPick(g, side);
 		const key = mode === 'spread' ? 'spread_pick' : 'ml_pick';
 		const next = g[key] === side ? null : side;
 		const prev = games;
@@ -48,6 +52,42 @@
 			err = (await res.text().catch(() => '')) || 'Could not save that pick.';
 			if (res.status === 409) invalidateAll();
 		}
+	}
+
+	/** A card pick cannot be cleared, only moved: the card must end up complete. */
+	async function cardPick(g: any, side: Side) {
+		if (!card.open) return;
+		const prev = card;
+		card = {
+			...card,
+			games: card.games.map((x: any) =>
+				x.id === g.id ? { ...x, card_pick: side, card_odds_at: side === 'home' ? x.ml_home : x.ml_away } : x
+			)
+		};
+		card = { ...card, filled: card.games.filter((x: any) => x.card_pick).length };
+		err = '';
+		const res = await fetch('/api/slate', {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ season: data.season, week: data.week, gameId: g.id, side })
+		});
+		if (!res.ok) {
+			card = prev;
+			err = (await res.text().catch(() => '')) || 'Could not save that pick.';
+		}
+	}
+
+	async function submitCard() {
+		if (card.filled < card.size || !card.open || submitting) return;
+		submitting = true;
+		const res = await fetch('/api/slate', {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ season: data.season, week: data.week, action: 'submit' })
+		});
+		submitting = false;
+		if (res.ok) card = { ...card, submitted: true, open: false };
+		else err = (await res.text().catch(() => '')) || 'Could not submit your card.';
 	}
 
 	async function toggleWatch(team: string) {
@@ -107,6 +147,20 @@
 	const defaultOpen = (name: string) => name === 'My teams' || groups.length < 4;
 	const isOpen = (name: string) => openChoice[name] ?? defaultOpen(name);
 
+	/**
+	 * A side you cannot pick. On the moneyline and on the card a price that pays nothing
+	 * for a correct pick is pure downside, and a game with no line at all cannot be
+	 * priced either way — both grey out rather than pretending to be a choice.
+	 */
+	const deadSide = (g: any, side: Side) =>
+		mode !== 'spread'
+			? mlDead(side === 'home' ? g.ml_home : g.ml_away)
+			: g.spread === null;
+	const deadGame = (g: any) => deadSide(g, 'home') && deadSide(g, 'away');
+
+	const pickOn = (g: any) =>
+		mode === 'spread' ? g.spread_pick : mode === 'ml' ? g.ml_pick : g.card_pick;
+
 	const mlPicks = $derived(shown.filter((g: any) => g.ml_pick));
 	const upside = $derived(mlPicks.reduce((t: number, g: any) => t + mlWin(g.ml_odds_at ?? 0), 0));
 	const spreadCount = $derived(shown.filter((g: any) => g.spread_pick).length);
@@ -114,7 +168,7 @@
 	const outcome = (g: any) =>
 		mode === 'spread'
 			? gradeSpread(g.spread_pick, g.spread_at ?? g.spread, g.home_score, g.away_score)
-			: gradeMl(g.ml_pick, g.home_score, g.away_score);
+			: gradeMl(pickOn(g), g.home_score, g.away_score);
 
 	const BANDS = [['all', 'ALL'], ['close', '≤3'], ['mid', '3–10'], ['blowout', '10+']] as const;
 	const GROUPS = [['conf', 'CONF'], ['top25', 'TOP 25'], ['time', 'DAY']] as const;
@@ -137,23 +191,48 @@
 		</div>
 	</div>
 
-	<!-- mode: spreads or moneyline -->
+	<!-- mode: spreads, moneyline, or the weekly card -->
 	<div class="sticky top-0 z-30 -mx-3 mb-3 px-3 pb-2 pt-2 backdrop-blur-md" style="background:color-mix(in oklab, var(--bg) 88%, transparent)">
 		<div class="flex gap-[3px]">
-			{#each [['spread', 'SPREADS', spreadCount], ['ml', 'MONEYLINE', mlPicks.length]] as const as [m, label, n]}
+			{#each [['spread', 'SPREADS', spreadCount, 'var(--hot)'], ['ml', 'MONEYLINE', mlPicks.length, 'var(--led)'], ['card', 'THE CARD', card.frozen ? card.filled : 0, '#f2c14e']] as const as [m, label, n, hue]}
 				<button onclick={() => (mode = m)} aria-pressed={mode === m}
-					class="slant cond h-10 flex-1 border text-[14px] font-bold tracking-[0.14em] transition-colors"
+					class="slant cond h-10 flex-1 border text-[13px] font-bold tracking-[0.12em] transition-colors"
 					style="border-color:{mode === m ? 'transparent' : 'var(--edge)'};
-						background:{mode === m ? (m === 'spread' ? 'var(--hot)' : 'var(--led)') : 'var(--panel)'};
+						background:{mode === m ? hue : 'var(--panel)'};
 						color:{mode === m ? '#12141c' : '#8b93a8'}"
 				>{label}{#if n}<span class="ml-1.5 opacity-70">{n}</span>{/if}</button>
 			{/each}
 		</div>
 		{#if mode === 'ml' && mlPicks.length}
 			<p class="cond mt-1.5 flex justify-between text-[13px] tracking-wider" style="color:var(--dim)">
-				<span>ALL HIT <b style="color:var(--ok)">+{upside.toFixed(2)}</b></span>
-				<span>ALL MISS <b style="color:var(--bad)">{(mlPicks.length * mlLose()).toFixed(2)}</b></span>
+				<span>ALL HIT <b style="color:var(--ok)">{fmtPts(upside)}</b></span>
+				<span>ALL MISS <b style="color:var(--bad)">{fmtPts(mlPicks.length * mlLose())}</b></span>
 			</p>
+		{/if}
+		{#if mode === 'card' && card.frozen}
+			<div class="mt-1.5 flex items-center gap-2">
+				<div class="h-1.5 flex-1 border" style="border-color:var(--edge);background:var(--panel)">
+					<div class="h-full transition-all"
+						style="width:{(card.filled / card.size) * 100}%;background:{card.submitted ? 'var(--ok)' : '#f2c14e'}"></div>
+				</div>
+				<span class="cond shrink-0 text-[13px] tracking-wider" style="color:var(--dim)">
+					{card.filled} / {card.size}
+				</span>
+				{#if card.submitted}
+					<span class="cond shrink-0 border px-2 py-0.5 text-[13px] font-bold tracking-wider"
+						style="border-color:var(--ok);color:var(--ok)">SUBMITTED</span>
+				{:else if !card.open}
+					<span class="cond shrink-0 border px-2 py-0.5 text-[13px] font-bold tracking-wider"
+						style="border-color:var(--bad);color:var(--bad)">CLOSED</span>
+				{:else}
+					<button onclick={submitCard} disabled={card.filled < card.size || submitting}
+						class="cond shrink-0 border px-3 py-0.5 text-[13px] font-bold tracking-wider transition-colors disabled:cursor-not-allowed"
+						style="border-color:{card.filled < card.size ? 'var(--edge)' : '#f2c14e'};
+							background:{card.filled < card.size ? 'transparent' : '#f2c14e'};
+							color:{card.filled < card.size ? '#5b6478' : '#12141c'}"
+					>{submitting ? 'SENDING' : 'SUBMIT'}</button>
+				{/if}
+			</div>
 		{/if}
 		{#if err}
 			<p role="alert" class="cond mt-1.5 border px-3 py-1.5 text-[14px] tracking-wide"
@@ -161,8 +240,8 @@
 		{/if}
 	</div>
 
-	<!-- search + filters -->
-	<div class="mb-4 space-y-2">
+	<!-- search + filters: the card is a fixed ten, so it has nothing to filter -->
+	<div class="mb-4 space-y-2" class:hidden={mode === 'card'}>
 		<label class="block">
 			<span class="sr-only">Search teams or conference</span>
 			<input type="search" bind:value={q} placeholder="SEARCH TEAM OR CONFERENCE" class="searchbox" />
@@ -183,6 +262,136 @@
 		</div>
 	</div>
 
+	<!-- One game, shared by the grouped board and the weekly card. -->
+	{#snippet gameCard(g: any)}
+					{@const ac = teamBg(g.away_color, g.away_alt_color, g.away_logo_color)}
+					{@const hc = teamBg(g.home_color, g.home_alt_color, g.home_logo_color)}
+					{@const done = g.state === 'post'}
+					{@const picked = pickOn(g)}
+				{@const dead = deadGame(g)}
+					{@const res = picked && done ? outcome(g) : null}
+					<article class="border transition-opacity" style="border-color:var(--edge);background:#0f121a;
+					{dead ? 'filter:grayscale(1);opacity:0.5' : ''}">
+						<div class="flex items-center gap-2 border-b px-2.5 py-1.5" style="border-color:var(--line)">
+							<span class="cond text-[13px] font-semibold tracking-[0.12em]"
+								style="color:{g.state === 'in' ? 'var(--hot)' : 'var(--dim)'}">
+								{#if g.state === 'in'}● {g.detail}{:else if done}{g.detail}{:else}{et(g.start)}{/if}
+							</span>
+							{#if g.tv && !done}<span class="cond text-[12px] tracking-wider" style="color:#5b6478">{g.tv}</span>{/if}
+							{#if g.locked && !done}<span class="cond text-[12px] tracking-wider" style="color:#5b6478">LOCKED</span>{/if}
+							<span class="ml-auto flex gap-1">
+								{#each ['away', 'home'] as const as side}
+									{@const abbr = g[`${side}_abbr`]}
+									<button onclick={() => toggleWatch(abbr)} aria-pressed={watched.has(abbr)}
+										aria-label="Follow {g[`${side}_name`]}"
+										class="cond px-1 text-[12px] font-semibold tracking-wide transition-colors"
+										style="color:{watched.has(abbr) ? 'var(--led)' : '#41485c'}">★{abbr}</button>
+								{/each}
+							</span>
+						</div>
+
+						<div class="relative grid grid-cols-2">
+							{#each ['away', 'home'] as const as side}
+								{@const c = side === 'away' ? ac : hc}
+								{@const rank = g[`${side}_rank`]}
+								{@const odds = side === 'home' ? g.ml_home : g.ml_away}
+								{@const lockedAt = mode === 'card' ? g.card_odds_at : g.ml_odds_at}
+								{@const shownOdds = picked === side && lockedAt != null ? lockedAt : odds}
+								{@const on = picked === side}
+								{@const fg = on ? inkOn(c) : '#e8eaf0'}
+								{@const dimmed = picked && !on}
+								{@const off = deadSide(g, side)}
+								<button
+									onclick={() => pick(g, side)}
+									disabled={g.locked || off || (mode === 'card' && !card.open)}
+									aria-pressed={on}
+									aria-label="{mode === 'spread' ? 'Spread' : mode === 'ml' ? 'Moneyline' : 'Card'} pick {g[`${side}_name`]}"
+									class="relative overflow-hidden px-2.5 pb-2.5 pt-3 text-left transition-all disabled:cursor-not-allowed"
+									class:border-l={side === 'home'}
+									class:pl-6={side === 'home'}
+									style="border-color:var(--line);
+										background:{on ? c : `color-mix(in oklab, ${c} ${TINT * 100}%, #0f121a)`};
+										color:{fg};
+										{off ? 'filter:grayscale(1);' : ''}
+										opacity:{off ? 0.45 : dimmed ? 0.4 : g.locked && !picked ? 0.62 : 1}"
+								>
+									{#if g[`${side}_logo`]}
+										<!-- The logo keeps its own colours, always. When it would otherwise be
+										     invisible against a background ESPN derived from it, it gets an ink
+										     outline instead of being repainted. -->
+										{@const halo = on ? g[`${side}_halo_on`] : g[`${side}_halo_off`]}
+										<img src={g[`${side}_logo`]} alt="" loading="lazy"
+											class="pointer-events-none absolute right-1.5 top-1.5 w-[62px]"
+											style="opacity:{on ? 1 : 0.9}{halo ? `;filter:${haloFilter(fg)}` : ''}" />
+									{/if}
+									{#if rank < 26}
+										<span class="display block text-[11px] leading-none" style="color:{on ? fg : 'var(--led)'}">{rank}</span>
+									{/if}
+									<span class="display block text-[25px] leading-[0.9]">{g[`${side}_abbr`]}</span>
+
+									{#if mode === 'spread'}
+										<span class="display mt-1.5 block text-[17px] leading-none">
+											{lineFor(on && g.spread_at !== null ? g.spread_at : g.spread, side)}
+										</span>
+										<span class="cond block text-[13px] font-semibold" style="opacity:.6">
+											{odds !== null ? fmtOdds(odds) : '—'}
+										</span>
+									{:else if odds !== null}
+										<span class="display mt-1.5 block text-[17px] leading-none">{fmtOdds(shownOdds)}</span>
+										{#if off}
+											<span class="cond block text-[13px] font-semibold" style="opacity:.7">PAYS NOTHING</span>
+										{:else}
+											<span class="cond block text-[13px] font-semibold">
+												<span style="color:{on ? fg : 'var(--ok)'}">{fmtPts(mlWin(shownOdds))}</span>
+												<span style="opacity:.45"> / </span>
+												<span style="color:{on ? fg : 'var(--bad)'}">{mlLose()}</span>
+											</span>
+										{/if}
+									{:else}
+										<span class="cond mt-1.5 block text-[13px]" style="opacity:.5">NO LINE</span>
+									{/if}
+
+									{#if done || g.state === 'in'}
+										<span class="display absolute bottom-2 right-2.5 text-[22px] leading-none"
+											style="opacity:{on ? 1 : 0.75}">{g[`${side}_score`] ?? 0}</span>
+									{/if}
+									{#if res && res !== 'pending'}
+										<span class="display absolute right-0 top-0 px-1.5 py-0.5 text-[10px] leading-none"
+											style="background:{res === 'win' ? 'var(--ok)' : res === 'loss' ? 'var(--bad)' : '#6b7488'};color:#0b0d12">
+											{res === 'win' ? 'W' : res === 'loss' ? 'L' : 'PUSH'}{#if mode !== 'spread' && lockedAt}
+												{fmtPts(mlPoints(res, lockedAt))}{/if}
+										</span>
+									{/if}
+								</button>
+							{/each}
+							<span class="display absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 border px-1.5 py-0.5 text-[10px] leading-none"
+								style="background:#0f121a;border-color:var(--edge);color:#6b7488">AT</span>
+						</div>
+					</article>
+	{/snippet}
+
+	{#if mode === 'card'}
+		<div class="space-y-3">
+			{#if !card.frozen}
+				<p class="cond py-16 text-center text-[15px] leading-relaxed tracking-wider" style="color:var(--dim)">
+					THIS WEEK'S CARD ISN'T SET YET.<br />
+					<span style="opacity:.7">It locks in once ten games have a moneyline.</span>
+				</p>
+			{:else}
+				<p class="cond text-[13px] leading-relaxed tracking-wider" style="color:var(--dim)">
+					THE TEN GAMES THAT MATTER, RANKED. PICK EVERY ONE, THEN SUBMIT.
+					{#if card.deadline}<br /><span style="opacity:.7">Closes at first kickoff — {et(card.deadline.replace(' ', 'T') + 'Z')}.</span>{/if}
+				</p>
+				{#each card.games as g, i (g.id)}
+					<div class="flex items-start gap-2">
+						<span class="display mt-3 w-5 shrink-0 text-right text-[15px] leading-none"
+							style="color:{g.card_pick ? '#f2c14e' : 'var(--dim)'}">{i + 1}</span>
+						<div class="min-w-0 flex-1">{@render gameCard(g)}</div>
+					</div>
+				{/each}
+			{/if}
+		</div>
+	{:else}
 	<div class="space-y-3">
 		{#each groups as [name, list] (name)}
 			<details bind:open={() => isOpen(name), (v) => (openChoice[name] = v)} class="grp">
@@ -193,101 +402,7 @@
 				</summary>
 				<div class="mt-2 space-y-2.5">
 					{#each list as g (g.id)}
-						{@const ac = teamBg(g.away_color, g.away_alt_color, g.away_logo_color)}
-						{@const hc = teamBg(g.home_color, g.home_alt_color, g.home_logo_color)}
-						{@const done = g.state === 'post'}
-						{@const picked = mode === 'spread' ? g.spread_pick : g.ml_pick}
-						{@const res = picked && done ? outcome(g) : null}
-						<article class="border" style="border-color:var(--edge);background:#0f121a">
-							<div class="flex items-center gap-2 border-b px-2.5 py-1.5" style="border-color:var(--line)">
-								<span class="cond text-[13px] font-semibold tracking-[0.12em]"
-									style="color:{g.state === 'in' ? 'var(--hot)' : 'var(--dim)'}">
-									{#if g.state === 'in'}● {g.detail}{:else if done}{g.detail}{:else}{et(g.start)}{/if}
-								</span>
-								{#if g.tv && !done}<span class="cond text-[12px] tracking-wider" style="color:#5b6478">{g.tv}</span>{/if}
-								{#if g.locked && !done}<span class="cond text-[12px] tracking-wider" style="color:#5b6478">LOCKED</span>{/if}
-								<span class="ml-auto flex gap-1">
-									{#each ['away', 'home'] as const as side}
-										{@const abbr = g[`${side}_abbr`]}
-										<button onclick={() => toggleWatch(abbr)} aria-pressed={watched.has(abbr)}
-											aria-label="Follow {g[`${side}_name`]}"
-											class="cond px-1 text-[12px] font-semibold tracking-wide transition-colors"
-											style="color:{watched.has(abbr) ? 'var(--led)' : '#41485c'}">★{abbr}</button>
-									{/each}
-								</span>
-							</div>
-
-							<div class="relative grid grid-cols-2">
-								{#each ['away', 'home'] as const as side}
-									{@const c = side === 'away' ? ac : hc}
-									{@const rank = g[`${side}_rank`]}
-									{@const odds = side === 'home' ? g.ml_home : g.ml_away}
-									{@const shownOdds = picked === side && g.ml_odds_at != null ? g.ml_odds_at : odds}
-									{@const on = picked === side}
-					{@const fg = on ? inkOn(c) : '#e8eaf0'}
-									{@const dimmed = picked && !on}
-									<button
-										onclick={() => pick(g, side)}
-										disabled={g.locked || (mode === 'ml' ? odds === null : g.spread === null)}
-										aria-pressed={on}
-										aria-label="{mode === 'spread' ? 'Spread' : 'Moneyline'} pick {g[`${side}_name`]}"
-										class="relative overflow-hidden px-2.5 pb-2.5 pt-3 text-left transition-all disabled:cursor-not-allowed"
-										class:border-l={side === 'home'}
-										class:pl-6={side === 'home'}
-										style="border-color:var(--line);
-											background:{on ? c : `color-mix(in oklab, ${c} ${TINT * 100}%, #0f121a)`};
-											color:{fg};
-											opacity:{dimmed ? 0.4 : g.locked && !picked ? 0.62 : 1}"
-									>
-										{#if g[`${side}_logo`]}
-											<!-- The logo keeps its own colours, always. When it would otherwise be
-											     invisible against a background ESPN derived from it, it gets an ink
-											     outline instead of being repainted. -->
-											{@const halo = on ? g[`${side}_halo_on`] : g[`${side}_halo_off`]}
-											<img src={g[`${side}_logo`]} alt="" loading="lazy"
-												class="pointer-events-none absolute right-1.5 top-1.5 w-[62px]"
-												style="opacity:{on ? 1 : 0.9}{halo ? `;filter:${haloFilter(fg)}` : ''}" />
-										{/if}
-										{#if rank < 26}
-											<span class="display block text-[11px] leading-none" style="color:{on ? fg : 'var(--led)'}">{rank}</span>
-										{/if}
-										<span class="display block text-[25px] leading-[0.9]">{g[`${side}_abbr`]}</span>
-
-										{#if mode === 'spread'}
-											<span class="display mt-1.5 block text-[17px] leading-none">
-												{lineFor(on && g.spread_at !== null ? g.spread_at : g.spread, side)}
-											</span>
-											<span class="cond block text-[13px] font-semibold" style="opacity:.6">
-												{odds !== null ? fmtOdds(odds) : '—'}
-											</span>
-										{:else if odds !== null}
-											<span class="display mt-1.5 block text-[17px] leading-none">{fmtOdds(shownOdds)}</span>
-											<span class="cond block text-[13px] font-semibold">
-												<span style="color:{on ? fg : 'var(--ok)'}">+{mlWin(shownOdds).toFixed(2)}</span>
-												<span style="opacity:.45"> / </span>
-												<span style="color:{on ? fg : 'var(--bad)'}">-1.00</span>
-											</span>
-										{:else}
-											<span class="cond mt-1.5 block text-[13px]" style="opacity:.5">NO LINE</span>
-										{/if}
-
-										{#if done || g.state === 'in'}
-											<span class="display absolute bottom-2 right-2.5 text-[22px] leading-none"
-												style="opacity:{on ? 1 : 0.75}">{g[`${side}_score`] ?? 0}</span>
-										{/if}
-										{#if res && res !== 'pending'}
-											<span class="display absolute right-0 top-0 px-1.5 py-0.5 text-[10px] leading-none"
-												style="background:{res === 'win' ? 'var(--ok)' : res === 'loss' ? 'var(--bad)' : '#6b7488'};color:#0b0d12">
-												{res === 'win' ? 'W' : res === 'loss' ? 'L' : 'PUSH'}{#if mode === 'ml' && g.ml_odds_at}
-													{mlPoints(res, g.ml_odds_at) > 0 ? '+' : ''}{mlPoints(res, g.ml_odds_at).toFixed(2)}{/if}
-											</span>
-										{/if}
-									</button>
-								{/each}
-								<span class="display absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 border px-1.5 py-0.5 text-[10px] leading-none"
-									style="background:#0f121a;border-color:var(--edge);color:#6b7488">AT</span>
-							</div>
-						</article>
+						{@render gameCard(g)}
 					{/each}
 				</div>
 			</details>
@@ -297,4 +412,5 @@
 			</p>
 		{/each}
 	</div>
+	{/if}
 </div>
