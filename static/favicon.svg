@@ -1,9 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="CFB Pick'em">
   <rect width="64" height="64" fill="#ff4d1c"/>
+  <!-- Quadratic lens at roughly 1.7:1, a real football's proportion. The control
+       point is twice the height you want: 34 gives a 17-unit half-height. -->
   <g transform="translate(32 32) rotate(-20)">
-    <path d="M-29 0 Q0 -38 29 0 Q0 38 -29 0 Z" fill="#0c0e14"/>
-    <g stroke="#ff4d1c" stroke-width="4" stroke-linecap="round">
-      <path d="M-13 0 H13"/><path d="M-6 -6 V6"/><path d="M6 -6 V6"/>
+    <path d="M-29 0 Q0 -34 29 0 Q0 34 -29 0 Z" fill="#0c0e14"/>
+    <g stroke="#ff4d1c" stroke-width="3.6" stroke-linecap="round">
+      <path d="M-13 0 H13"/><path d="M-6 -5.2 V5.2"/><path d="M6 -5.2 V5.2"/>
     </g>
   </g>
 </svg>
