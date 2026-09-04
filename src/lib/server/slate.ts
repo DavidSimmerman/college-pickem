@@ -13,7 +13,8 @@ export type SlateState = {
 	filled: number; // games with a pick, of any kind
 	openLeft: number; // games still pickable that have no pick — these block submitting
 	missed: number; // games that kicked off before you got to them
-	size: number;
+	size: number; // how many games are on the board
+	needed: number; // how many you can still be judged on — size minus the ones missed
 };
 
 /**
@@ -50,7 +51,7 @@ export async function getSlate(playerId: number, season: number, week: number): 
 	if (!frozen) {
 		return {
 			games: [], frozen: false, submitted: false, deadline: null,
-			open: false, filled: 0, openLeft: 0, missed: 0, size: SLATE_SIZE
+			open: false, filled: 0, openLeft: 0, missed: 0, size: SLATE_SIZE, needed: SLATE_SIZE
 		};
 	}
 
@@ -85,6 +86,11 @@ export async function getSlate(playerId: number, season: number, week: number): 
 		season, week
 	);
 
+	// A game that kicked off with no pick on it is out of reach, so it stops counting
+	// toward the card. The denominator shrinks with it — a board where one game got
+	// away is out of nine, not a permanent nine out of ten.
+	const missed = games.filter((g) => !g.slate_pick && g.locked).length;
+
 	return {
 		games,
 		frozen: true,
@@ -93,7 +99,8 @@ export async function getSlate(playerId: number, season: number, week: number): 
 		open: !submitted,
 		filled: games.filter((g) => g.slate_pick).length,
 		openLeft: games.filter((g) => !g.slate_pick && !g.locked).length,
-		missed: games.filter((g) => !g.slate_pick && g.locked).length,
-		size: games.length
+		missed,
+		size: games.length,
+		needed: games.length - missed
 	};
 }

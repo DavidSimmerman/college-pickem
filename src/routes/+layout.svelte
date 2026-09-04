@@ -2,7 +2,13 @@
 	import '../app.css';
 	import { page } from '$app/state';
 	let { children, data } = $props();
-	const nav = [['/', 'PICKS'], ['/me', 'MY PICKS'], ['/standings', 'STANDINGS']];
+	// Two labels each: the phone gets the short one, because three full words plus a
+	// name will not fit on a 320px screen without wrapping into a three-line header.
+	const nav = [
+		['/', 'PICKS', 'PICKS'],
+		['/me', 'MY PICKS', 'MINE'],
+		['/standings', 'STANDINGS', 'RANKS']
+	];
 
 	// Link previews want absolute URLs. page.url.origin is ORIGIN in production, which
 	// is already required for form posts to work — so there is nothing new to configure.
@@ -28,18 +34,21 @@
 <div class="min-h-screen antialiased">
 	{#if data.player}
 		<header class="border-b" style="border-color:var(--edge)">
-			<div class="mx-auto flex max-w-2xl items-center gap-3 px-3 py-2.5">
-				<span class="display text-[15px] leading-none text-white">PICK<span style="color:var(--hot)">'</span>EM</span>
+			<div class="mx-auto flex max-w-2xl items-center gap-2 px-3 py-2.5 sm:gap-3">
+				<span class="display shrink-0 whitespace-nowrap text-[14px] leading-none text-white sm:text-[15px]"
+					>PICK<span style="color:var(--hot)">'</span>EM</span>
 				<nav class="flex gap-1">
-					{#each nav as [href, label]}
+					{#each nav as [href, long, short]}
 						{@const on = page.url.pathname === href}
 						<a {href} aria-current={on ? 'page' : undefined}
-							class="cond border px-2.5 py-1 text-[13px] font-bold tracking-[0.12em] transition-colors"
-							style="border-color:{on ? '#fff' : 'transparent'};color:{on ? '#fff' : '#7e879c'}">{label}</a>
+							class="cond border px-2 py-1 text-[12px] font-bold whitespace-nowrap tracking-[0.08em] transition-colors sm:px-2.5 sm:text-[13px] sm:tracking-[0.12em]"
+							style="border-color:{on ? '#fff' : 'transparent'};color:{on ? '#fff' : '#7e879c'}"
+							><span class="sm:hidden">{short}</span><span class="hidden sm:inline">{long}</span></a>
 					{/each}
 				</nav>
-				<form method="POST" action="/logout" class="ml-auto">
-					<button class="cond text-[13px] tracking-wider" style="color:#5b6478">{data.player.name} · OUT</button>
+				<form method="POST" action="/logout" class="ml-auto shrink-0">
+					<button class="cond whitespace-nowrap text-[12px] tracking-wider sm:text-[13px]" style="color:#5b6478"
+						><span class="hidden sm:inline">{data.player.name} ·&nbsp;</span>OUT</button>
 				</form>
 			</div>
 		</header>

@@ -248,10 +248,10 @@
 			<div class="mt-1.5 flex items-center gap-2">
 				<div class="h-1.5 flex-1 border" style="border-color:var(--edge);background:var(--panel)">
 					<div class="h-full transition-all"
-						style="width:{(slate.filled / slate.size) * 100}%;background:{slate.submitted ? 'var(--ok)' : '#f2c14e'}"></div>
+						style="width:{slate.needed ? (slate.filled / slate.needed) * 100 : 0}%;background:{slate.submitted ? 'var(--ok)' : '#f2c14e'}"></div>
 				</div>
 				<span class="cond shrink-0 text-[13px] tracking-wider" style="color:var(--dim)">
-					{slate.filled} / {slate.size}
+					{slate.filled} / {slate.needed}
 				</span>
 				{#if slate.submitted}
 					<span class="cond shrink-0 border px-2 py-0.5 text-[13px] font-bold tracking-wider"
