@@ -2,13 +2,21 @@
 	import '../app.css';
 	import { page } from '$app/state';
 	let { children, data } = $props();
-	// Two labels each: the phone gets the short one, because three full words plus a
-	// name will not fit on a 320px screen without wrapping into a three-line header.
+	// Full labels everywhere: the phone gets them in a menu rather than a squeeze.
 	const nav = [
-		['/', 'PICKS', 'PICKS'],
-		['/me', 'MY PICKS', 'MINE'],
-		['/standings', 'STANDINGS', 'RANKS']
+		['/', 'PICKS'],
+		['/me', 'MY PICKS'],
+		['/standings', 'STANDINGS']
 	];
+
+	let menu = $state(false);
+
+	// Navigating is the end of the menu's job. SvelteKit routes on the client, so the
+	// panel would otherwise still be sitting open over the page you asked for.
+	$effect(() => {
+		page.url.pathname;
+		menu = false;
+	});
 
 	// Link previews want absolute URLs. page.url.origin is ORIGIN in production, which
 	// is already required for form posts to work — so there is nothing new to configure.
@@ -31,26 +39,70 @@
 	<meta name="twitter:image" content={og} />
 </svelte:head>
 
+<svelte:window onkeydown={(e) => e.key === 'Escape' && (menu = false)} />
+
 <div class="min-h-screen antialiased">
 	{#if data.player}
-		<header class="border-b" style="border-color:var(--edge)">
-			<div class="mx-auto flex max-w-2xl items-center gap-2 px-3 py-2.5 sm:gap-3">
-				<span class="display shrink-0 whitespace-nowrap text-[14px] leading-none text-white sm:text-[15px]"
+		<header class="relative border-b" style="border-color:var(--edge)">
+			<div class="mx-auto flex max-w-2xl items-center gap-3 px-3 py-2.5">
+				<span class="display shrink-0 whitespace-nowrap text-[15px] leading-none text-white"
 					>PICK<span style="color:var(--hot)">'</span>EM</span>
-				<nav class="flex gap-1">
-					{#each nav as [href, long, short]}
+
+				<!-- Wide enough for the words: the inline nav. -->
+				<nav class="hidden gap-1 sm:flex">
+					{#each nav as [href, label]}
 						{@const on = page.url.pathname === href}
 						<a {href} aria-current={on ? 'page' : undefined}
-							class="cond border px-2 py-1 text-[12px] font-bold whitespace-nowrap tracking-[0.08em] transition-colors sm:px-2.5 sm:text-[13px] sm:tracking-[0.12em]"
-							style="border-color:{on ? '#fff' : 'transparent'};color:{on ? '#fff' : '#7e879c'}"
-							><span class="sm:hidden">{short}</span><span class="hidden sm:inline">{long}</span></a>
+							class="cond border px-2.5 py-1 text-[13px] font-bold whitespace-nowrap tracking-[0.12em] transition-colors"
+							style="border-color:{on ? '#fff' : 'transparent'};color:{on ? '#fff' : '#7e879c'}">{label}</a>
 					{/each}
 				</nav>
-				<form method="POST" action="/logout" class="ml-auto shrink-0">
-					<button class="cond whitespace-nowrap text-[12px] tracking-wider sm:text-[13px]" style="color:#5b6478"
-						><span class="hidden sm:inline">{data.player.name} ·&nbsp;</span>OUT</button>
+				<form method="POST" action="/logout" class="ml-auto hidden shrink-0 sm:block">
+					<button class="cond whitespace-nowrap text-[13px] tracking-wider" style="color:#5b6478"
+						>{data.player.name} ·&nbsp;OUT</button>
 				</form>
+
+				<!-- Narrow: one button, and the labels get to stay full inside it. -->
+				<button type="button" onclick={() => (menu = !menu)}
+					aria-expanded={menu} aria-controls="mobile-nav"
+					aria-label={menu ? 'Close menu' : 'Open menu'}
+					class="ml-auto -mr-1 flex h-9 w-9 shrink-0 items-center justify-center sm:hidden">
+					<svg width="19" height="14" viewBox="0 0 19 14" aria-hidden="true"
+						stroke={menu ? '#fff' : '#9aa2b8'} stroke-width="2" stroke-linecap="round">
+						{#if menu}
+							<path d="M3 2 L16 12" /><path d="M16 2 L3 12" />
+						{:else}
+							<path d="M1 2 H18" /><path d="M1 7 H18" /><path d="M1 12 H18" />
+						{/if}
+					</svg>
+				</button>
 			</div>
+
+			{#if menu}
+				<!-- Dimming the board behind does two jobs: the panel stops blending into a
+				     page that is nearly the same colour, and tapping away closes it. -->
+				<button type="button" aria-label="Close menu" tabindex="-1"
+					onclick={() => (menu = false)}
+					class="fixed inset-0 z-40 cursor-default sm:hidden"
+					style="background:rgba(6,8,12,.6)"></button>
+				<!-- Anchored to the header rather than pushing the page down, so opening the
+				     menu never shifts the board underneath it. -->
+				<nav id="mobile-nav"
+					class="absolute inset-x-0 top-full z-50 border-b shadow-2xl sm:hidden"
+					style="border-color:var(--edge);background:#171c2a">
+					{#each nav as [href, label]}
+						{@const on = page.url.pathname === href}
+						<a {href} aria-current={on ? 'page' : undefined}
+							class="cond block border-b px-4 py-3 text-[15px] font-bold tracking-[0.14em] transition-colors"
+							style="border-color:var(--line);color:{on ? '#fff' : '#7e879c'};
+								box-shadow:{on ? 'inset 3px 0 0 var(--hot)' : 'none'}">{label}</a>
+					{/each}
+					<form method="POST" action="/logout" class="flex items-center justify-between px-4 py-3">
+						<span class="cond text-[14px] tracking-wider" style="color:#5b6478">{data.player.name}</span>
+						<button class="cond text-[14px] font-bold tracking-[0.14em]" style="color:var(--bad)">SIGN OUT</button>
+					</form>
+				</nav>
+			{/if}
 		</header>
 	{/if}
 	{@render children()}
