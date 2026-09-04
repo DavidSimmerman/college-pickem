@@ -254,8 +254,12 @@
 			<!-- No count on the slate tab: "GAMES OF THE WEEK 9" reads as week nine. The
 			     progress bar directly below already says how many of them are picked. -->
 			{#each [['slate', 'GAMES OF THE WEEK', 0, '#f2c14e'], ['spread', 'SPREADS', spreadCount, 'var(--hot)'], ['ml', 'MONEYLINE', mlPicks.length, 'var(--led)']] as const as [m, label, n, hue]}
+				<!-- flex-auto, not flex-1: equal thirds gave the longest label the same room
+				     as SPREADS, so it ran into the slant. Growing from content width lets
+				     each tab keep its own padding. The slant clips 7px off two corners, so
+				     the padding has to clear that before it starts looking like padding. -->
 				<button onclick={() => (mode = m)} aria-pressed={mode === m}
-					class="slant cond h-10 flex-1 border text-[13px] font-bold tracking-[0.12em] transition-colors"
+					class="slant cond h-10 flex-auto whitespace-nowrap border px-3 text-[12px] font-bold tracking-[0.06em] transition-colors sm:px-4 sm:text-[13px] sm:tracking-[0.12em]"
 					style="border-color:{mode === m ? 'transparent' : 'var(--edge)'};
 						background:{mode === m ? hue : 'var(--panel)'};
 						color:{mode === m ? '#12141c' : '#8b93a8'}"
