@@ -125,14 +125,19 @@
 	);
 
 	/**
-	 * Order inside a group. A finished game has nothing left to decide, so it sinks to
-	 * the bottom whatever the sort — you are here to make picks, not read box scores.
-	 * `id` breaks remaining ties so the order never wobbles between renders.
+	 * Anything already under way has nothing left to decide, so it sinks: upcoming
+	 * first, then live, then final. You are here to make picks, not read box scores.
+	 */
+	const sunk = (g: any) => (g.state === 'post' ? 2 : g.state === 'in' || g.locked ? 1 : 0);
+
+	/**
+	 * Order inside a group. `id` breaks remaining ties so the order never wobbles
+	 * between renders.
 	 */
 	const order = (list: any[]) =>
 		[...list].sort(
 			(a, z) =>
-				(a.state === 'post' ? 1 : 0) - (z.state === 'post' ? 1 : 0) ||
+				sunk(a) - sunk(z) ||
 				(sortBy === 'close'
 					? Math.abs(a.spread ?? 999) - Math.abs(z.spread ?? 999)
 					: sortBy === 'best'
@@ -189,6 +194,14 @@
 
 	const pickOn = (g: any) =>
 		mode === 'spread' ? g.spread_pick : mode === 'ml' ? g.ml_pick : g.slate_pick;
+
+	// The seed is frozen and meaningful, so it travels with the game rather than being
+	// its position: started games sink here too, still labelled with the rank they hold.
+	const slateOrdered = $derived(
+		slate.games
+			.map((g: any, i: number) => ({ g, seed: i + 1 }))
+			.sort((a: any, z: any) => sunk(a.g) - sunk(z.g) || a.seed - z.seed)
+	);
 
 	const mlPicks = $derived(shown.filter((g: any) => g.ml_pick));
 	const upside = $derived(mlPicks.reduce((t: number, g: any) => t + mlWin(g.ml_odds_at ?? 0), 0));
@@ -320,7 +333,9 @@
 					{@const hc = teamBg(g.home_color, g.home_alt_color, g.home_logo_color)}
 					{@const done = g.state === 'post'}
 					{@const picked = pickOn(g)}
-					{@const shut = deadGame(g) || (mode === 'slate' && !!g.locked)}
+					<!-- Out of reach and unanswered: grey the whole card. A game you did pick
+					     keeps its colour so your side and the W/L badge stay readable. -->
+					{@const shut = deadGame(g) || (!!g.locked && !picked)}
 					{@const res = picked && done ? outcome(g) : null}
 					<article class="border transition-opacity" style="border-color:var(--edge);background:#0f121a;
 					{shut ? 'filter:grayscale(1);opacity:0.5' : ''}">
@@ -388,16 +403,17 @@
 									<span class="display block text-[25px] leading-[0.9]">{g[`${side}_abbr`]}</span>
 
 									{#if mode !== 'ml'}
-										<!-- Games of the Week is scored straight up, so the line is context only:
-										     shown so you can see who is favoured, never turned into points. -->
+										<!-- Games of the Week is scored straight up, so both numbers are context
+										     only: shown so you can see who is favoured, never turned into points.
+										     On the slate the price you locked in is the one worth showing; on
+										     spreads the moneyline is never locked, so it stays live. -->
+										{@const priced = mode === 'slate' ? shownOdds : odds}
 										<span class="display mt-1.5 block text-[17px] leading-none">
 											{lineFor(on && g.spread_at != null ? g.spread_at : g.spread, side)}
 										</span>
-										{#if mode === 'spread'}
-											<span class="cond block text-[13px] font-semibold" style="opacity:.6">
-												{odds !== null ? fmtOdds(odds) : '—'}
-											</span>
-										{/if}
+										<span class="cond block text-[13px] font-semibold" style="opacity:.6">
+											{priced != null ? fmtOdds(priced) : '—'}
+										</span>
 									{:else if odds !== null}
 										<span class="display mt-1.5 block text-[17px] leading-none">{fmtOdds(shownOdds)}</span>
 										{#if off}
@@ -440,21 +456,31 @@
 					<span style="opacity:.7">It locks in once ten games have a moneyline.</span>
 				</p>
 			{:else}
-				<p class="cond text-[13px] leading-relaxed tracking-wider" style="color:var(--dim)">
-					THE TEN GAMES THAT MATTER, RANKED. PICK EVERY WINNER STRAIGHT UP, THEN SUBMIT.<br />
-					<span style="opacity:.7">Win-loss only — no points here.</span>
-					<br /><span style="opacity:.7">
-					Each game locks at its own kickoff. You can still submit after that — the ones that
-					started just drop out.
-				</span>
-				{#if slate.missed && !slate.submitted}
-					<br /><span style="color:var(--bad)">
-						{slate.missed} game{slate.missed === 1 ? '' : 's'} kicked off before you picked {slate.missed === 1 ? 'it' : 'them'}.
-					</span>
-				{/if}
-				</p>
-				{#each slate.games as g, i (g.id)}
-					{@render gameCard(g, i + 1)}
+				<!-- This board is the front page and the only view with a name worth setting,
+				     so it gets a wordmark rather than a paragraph explaining itself. -->
+				<div class="flex flex-col items-center pt-1 pb-1 text-center">
+					<svg viewBox="0 0 64 64" class="h-9 w-9" aria-hidden="true">
+						<g transform="translate(32 32) rotate(-20)">
+							<path d="M-29 0 C-9.7 -22.67 9.7 -22.67 29 0 C9.7 22.67 -9.7 22.67 -29 0 Z" fill="#f2c14e" />
+							<g stroke="#0f121a" stroke-width="3.6" stroke-linecap="round">
+								<path d="M-13 0 H13" /><path d="M-6 -5.2 V5.2" /><path d="M6 -5.2 V5.2" />
+							</g>
+						</g>
+					</svg>
+					<h2 class="display mt-2 text-[27px] leading-[0.88] text-white sm:text-[32px]">
+						GAMES OF THE <span style="color:#f2c14e">WEEK</span>
+					</h2>
+					<div class="mt-2.5 h-px w-28"
+						style="background:linear-gradient(90deg,transparent,#f2c14e,transparent)"></div>
+					<p class="cond mt-2 text-[13px] tracking-[0.22em]" style="color:var(--dim)">PICK THE WINNER</p>
+					{#if slate.missed && !slate.submitted}
+						<p class="cond mt-2 text-[13px] tracking-wider" style="color:var(--bad)">
+							{slate.missed} game{slate.missed === 1 ? '' : 's'} kicked off before you picked {slate.missed === 1 ? 'it' : 'them'}.
+						</p>
+					{/if}
+				</div>
+				{#each slateOrdered as { g, seed } (g.id)}
+					{@render gameCard(g, seed)}
 				{/each}
 			{/if}
 		</div>
