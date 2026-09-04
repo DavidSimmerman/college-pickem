@@ -13,7 +13,7 @@
 // its marquee value no matter whose name is on it.
 
 import { CONFERENCES } from './conferences.ts';
-import { mlDead } from './scoring.ts';
+import { spDead, lineOn } from './scoring.ts';
 
 const POWER = new Set(['SEC', 'Big Ten', 'Big 12', 'ACC', 'FBS Independents']);
 const MID = new Set(['American', 'Mountain West', 'Sun Belt', 'MAC', 'CUSA', 'Pac-12']);
@@ -88,7 +88,7 @@ export function slateScore(g: SlateGame): number {
  */
 export function buildSlate(games: SlateGame[], size = SLATE_SIZE): SlateGame[] {
 	const eligible = games
-		.filter((g) => !mlDead(g.ml_home) && !mlDead(g.ml_away))
+		.filter((g) => !spDead(lineOn(g.spread, 'home')) && !spDead(lineOn(g.spread, 'away')))
 		.map((g) => ({ g, score: slateScore(g) }))
 		.sort((x, z) => z.score - x.score);
 
@@ -134,8 +134,8 @@ export async function selfTest() {
 	a.equal(buildSlate(board, 3).length, 3, 'the lock displaces rather than growing the board');
 
 	// Ineligible games never make a card: they are not decisions.
-	const noLine = g({ ml_home: null, ml_away: null, spread: 0 });
-	const oneSided = g({ ml_home: -100000, ml_away: 5000, spread: 0 });
+	const noLine = g({ spread: null });
+	const oneSided = g({ spread: -50.5 });
 	const fine = g({ spread: -3 });
 	const built = buildSlate([noLine, oneSided, fine], 3);
 	a.deepEqual(built.map((x) => x.id), [fine.id], 'no-line and foregone games are excluded');

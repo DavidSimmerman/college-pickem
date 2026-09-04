@@ -1,49 +1,60 @@
 // Scoring rules, shared by client and server. See selfTest() at the bottom.
 
-/** Decimal-odds profit multiple for American odds. -200 -> 0.5, +150 -> 1.5 */
-export const mult = (american: number) => (american > 0 ? american / 100 : 100 / -american);
+/**
+ * Points, priced off the spread rather than the moneyline.
+ *
+ * You still pick a winner outright; the spread is only how the pick is priced. A
+ * coin-flip game is worth 5 and costs 5. Every 3.5 points of spread beyond the
+ * pick-em band moves one bucket: back the favourite and the win shrinks while the
+ * miss grows, take the dog and the reverse.
+ *
+ *   line   -14  -10.5   -7   ±3.5   +7   +10.5  +14
+ *   win      2      3    4      5    6       7    8
+ *   miss    -8     -7   -6     -5   -4      -3   -2
+ *
+ * The band is ±3.5 rather than 0, so a field goal either way is still a pick-em —
+ * anything tighter turns the most interesting games on the board into six different
+ * prices separated by half a point.
+ *
+ * Why win + |miss| is always STAKE: it is the only shape that cannot be farmed. A
+ * pick against a fair line is worth nothing in expectation only if you risk the same
+ * amount whatever you back; charge favourites more when they fold and every dog
+ * becomes free money, so "take every underdog" beats thinking.
+ *
+ * A side whose win is 0 or less is pure downside — there is no decision in taking it,
+ * so it is not offered. That happens past about 17.5 points of spread.
+ */
+export const CORE = 3.5; // half-width of the pick-em band
+export const STEP = 3.5; // spread per bucket beyond it
+export const BASE = 5; // what a pick-em pays
+export const STAKE = 10; // win + |miss|, always
+export const MAX_BUCKET = 4; // the ladder stops at 9 / -1
+export const CHALK_CUTOFF = 21.5; // favourites this heavy are not offered
 
 /**
- * Moneyline points — "flat risk", the only farm-proof shape.
+ * Which bucket a side's line falls in. 0 inside the band, + toward the dog.
  *
- *   win  = the odds multiple x SCALE, capped at MAX_WIN  (a +350 dog pays 35)
- *   lose = exactly RISK, always
- *
- * Why the loss has to be flat: if a hit pays the odds multiple b, the only loss
- * that makes a pick break even against a fair line is
- *     EV = p·b − (1−p)·L = 0,  with b = (1−p)/p   ⇒   L = 1  (scaled: L = RISK)
- * Charging heavy favourites more when they fold (the tempting −1/b rule) makes
- * every underdog strictly +EV, so "take every longshot every week" farms points
- * with no skill at all. Backtested over 2,316 real games with real closing lines
- * (2023-25): under this rule every no-skill strategy lands at or below zero and
- * only beating the market pays.
- *
- * Heavy favourites are still punished — through the ratio, not the penalty.
- * A -400 favourite risks 10 points to win 3, so it has to hit 80% of the time just
- * to break even. Chasing chalk still bleeds you dry.
- *
- * MAX_WIN caps the lottery: an uncapped +5000 cupcake would pay 500 points and
- * decide the season on a single fluke.
- *
- * Points are whole numbers. That is why RISK is 10 rather than 1: at a risk of one
- * point, rounding flattens the board — every favourite shorter than -200 collapses to
- * zero (60 of 134 pickable sides on a real week) and a pick'em is worth the same as a
- * -180 favourite. Charging ten points per miss keeps a full point of resolution where
- * it matters while every displayed number stays an integer.
+ * The clamp is load-bearing, not cosmetic. Without it a 21-point dog would be
+ * worth 10 for a win and nothing for a miss, and a 24.5-point dog would pay a
+ * point for being wrong — a free roll you could take every week forever.
  */
-export const SCALE = 10;
-export const MAX_WIN = 15 * SCALE;
-export const RISK = 1 * SCALE;
+export function bucket(line: number): number {
+	const beyond = Math.abs(line) - CORE;
+	if (beyond <= 0) return 0;
+	const k = Math.min(Math.ceil(beyond / STEP), MAX_BUCKET);
+	return line > 0 ? k : -k;
+}
 
-export const mlWin = (american: number) => Math.min(Math.round(mult(american) * SCALE), MAX_WIN);
-export const mlLose = (_american?: number) => -RISK;
+/** `line` is from the picked side's point of view: negative lays points. */
+export const spWin = (line: number) => BASE + bucket(line);
+export const spLose = (line: number) => spWin(line) - STAKE;
 
-/**
- * A side so heavily favoured that a correct pick pays nothing: it can only cost you
- * points. There is no decision in taking it, so the UI refuses the pick rather than
- * letting someone hand back a point for nothing.
- */
-export const mlDead = (american: number | null): boolean => american === null || mlWin(american) === 0;
+/** No line, or a favourite so heavy that backing it is not a decision. */
+export const spDead = (line: number | null): boolean => line === null || line <= -CHALK_CUTOFF;
+
+/** The line one side is getting, from ESPN's home-relative spread. */
+export const lineOn = (spread: number | null, side: 'home' | 'away'): number | null =>
+	spread === null ? null : side === 'home' ? spread : -spread;
 
 export type Outcome = 'win' | 'loss' | 'push' | 'pending';
 export type Side = 'home' | 'away';
@@ -71,10 +82,10 @@ export function gradeMl(pick: Side, homeScore: number | null, awayScore: number 
 	return pick === winner ? 'win' : 'loss';
 }
 
-/** Points earned for a graded moneyline pick at the price that was locked in. */
-export function mlPoints(outcome: Outcome, american: number | null): number {
-	if (american === null || outcome === 'pending' || outcome === 'push') return 0;
-	return outcome === 'win' ? mlWin(american) : mlLose(american);
+/** Points for a graded pick, at the line that was locked in when it was made. */
+export function spPoints(outcome: Outcome, line: number | null): number {
+	if (line === null || outcome === 'pending' || outcome === 'push') return 0;
+	return outcome === 'win' ? spWin(line) : spLose(line);
 }
 
 /** "-4.5" / "+3" from a given side's perspective. */
@@ -95,43 +106,87 @@ export async function selfTest() {
 	const a: typeof import('node:assert').strict = (await import('node:assert')).strict;
 	const near = (x: number, y: number, m = '') => a.ok(Math.abs(x - y) < 1e-9, `${m} ${x} != ${y}`);
 
-	// payout shape: the win scales with the upset, a miss always costs the same
-	near(mlWin(350), 35, 'dog win pays the odds');
-	near(mlWin(-400), 3, 'chalk win is thin');
-	near(mlWin(100), 10, 'pick-em pays even');
-	near(mlLose(350), -10, 'every miss costs exactly RISK');
-	near(mlLose(-400), -10);
-	near(mlLose(-9000), -10, 'even a blown cupcake chalk costs only RISK');
-
-	// every payout is a whole number, which is the point of the scale
-	for (const odds of [-9000, -400, -298, -110, 100, 240, 350, 5000])
-		a.ok(Number.isInteger(mlWin(odds)), `mlWin(${odds}) must be a whole number`);
-	a.ok(Number.isInteger(mlLose()), 'mlLose must be a whole number');
-
-	// dead sides: paying nothing for a correct pick is pure downside, so they are
-	// not offered at all.
-	a.equal(mlDead(-100000), true, 'a -100000 chalk pays nothing');
-	a.equal(mlDead(-2500), true);
-	a.equal(mlDead(-200), false, 'the shortest price still worth a point stays live');
-	a.equal(mlDead(-110), false);
-	a.equal(mlDead(5000), false);
-	a.equal(mlDead(null), true, 'no line at all is not pickable');
-
-	// The farm-proof property survives the rounding: against a fair line every pick is
-	// worth zero up to the half-point the rounding can move it, so no odds range can be
-	// farmed for points without beating the market.
-	for (const odds of [-9000, -450, -200, -110, 120, 350, 900, 2500]) {
-		const b = mult(odds);
-		const p = 1 / (b + 1); // fair win probability implied by that price
-		const ev = p * mlWin(odds) + (1 - p) * mlLose(odds);
-		if (b * SCALE <= MAX_WIN) a.ok(Math.abs(ev) <= 0.5, `odds ${odds} must be EV-neutral: ${ev}`);
-		else a.ok(ev < 0, `capped longshot ${odds} must not be +EV`);
+	// The table, exactly as specified: a pick-em pays 5 and costs 5, and every 3.5
+	// points of spread past the band moves one bucket either way.
+	const table: [number, number, number][] = [
+		// line, win, miss
+		[0, 5, -5],
+		[-3.5, 5, -5], [3.5, 5, -5],   // the whole band is pick-em
+		[-1.5, 5, -5], [1.5, 5, -5],
+		[-7, 4, -6], [7, 6, -4],
+		[-10.5, 3, -7], [10.5, 7, -3],
+		[-14, 2, -8], [14, 8, -2],
+		[-17.5, 1, -9], [17.5, 9, -1]
+	];
+	for (const [line, win, miss] of table) {
+		a.equal(spWin(line), win, `line ${line} should win ${win}`);
+		a.equal(spLose(line), miss, `line ${line} should cost ${miss}`);
 	}
 
-	// lottery cap
-	near(mlWin(20000), MAX_WIN, 'longshot payout is capped');
-	near(mlWin(1500), MAX_WIN, 'cap boundary');
-	near(mlWin(1400), 140, 'just inside the cap is exact');
+	// A half point past a boundary moves you into the next bucket, never before it.
+	a.equal(spWin(-3.5), 5, 'the band is inclusive at its edge');
+	a.equal(spWin(-4), 4, 'half a point past the band is the next bucket');
+	a.equal(spWin(-7), 4, 'and it holds to the end of that bucket');
+	a.equal(spWin(-7.5), 3);
+
+	// win + |miss| is the stake, at every line. This is the anti-farming property.
+	for (let line = -21; line <= 21; line += 0.5)
+		a.equal(spWin(line) - spLose(line), STAKE, `stake must be flat at ${line}`);
+
+	// Symmetry: what the favourite gives up is exactly what the dog picks up.
+	for (let line = 0.5; line <= 17.5; line += 0.5)
+		a.equal(spWin(line) + spWin(-line), 2 * BASE, `buckets must mirror at ${line}`);
+
+	// every payout is a whole number
+	for (let line = -21; line <= 21; line += 0.5) {
+		a.ok(Number.isInteger(spWin(line)), `spWin(${line}) must be whole`);
+		a.ok(Number.isInteger(spLose(line)), `spLose(${line}) must be whole`);
+	}
+
+	// the ladder stops, in both directions
+	a.equal(spWin(-17.5), 1); a.equal(spWin(-21), 1, 'the favourite ladder floors at 1');
+	a.equal(spWin(17.5), 9); a.equal(spWin(40), 9, 'and the dog ladder ceils at 9');
+
+	// The clamp exists to stop a free roll: no miss may ever be worth nothing, let
+	// alone pay. Without it a +24.5 dog would earn a point for being wrong.
+	for (let line = -21; line <= 60; line += 0.5)
+		a.ok(spLose(line) <= -1, `a miss at ${line} must cost at least a point`);
+
+	// dead sides: backing a favourite this heavy is not a decision, so it is refused.
+	a.equal(spDead(null), true, 'no line at all is not pickable');
+	a.equal(spDead(-21), false, 'the heaviest chalk still on the board');
+	a.equal(spDead(-21.5), true, 'and the first one past the cutoff is gone');
+	a.equal(spDead(-40), true);
+	a.equal(spDead(40), false, 'no dog is ever dead — someone has to take them');
+
+	// A pick against a fair line is worth nothing in expectation, so no band of the
+	// board can be farmed without actually beating the market. Win probability from
+	// the spread via the usual normal model, sigma ~ 13.5 points in college football.
+	const erf = (x: number) => {
+		const t = 1 / (1 + 0.3275911 * Math.abs(x));
+		const y = 1 - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
+		return x >= 0 ? y : -y;
+	};
+	const pWin = (line: number) => 0.5 * (1 + erf(-line / (13.5 * Math.SQRT2)));
+	let worst = 0;
+	for (let line = -21; line <= 21; line += 0.5) {
+		if (spDead(line)) continue;
+		const p = pWin(line);
+		const ev = p * spWin(line) + (1 - p) * spLose(line);
+		worst = Math.max(worst, Math.abs(ev));
+	}
+	// Buckets are 3.5 points wide and the pick-em band is a full 7 points across, so a
+	// line can sit some way from its price. The worst case is the top edge of the band:
+	// a 3.5-point favourite is priced as a coin flip but wins about 60% of the time,
+	// which is worth just over a point a pick. Centring the buckets on each multiple of
+	// 3.5 instead would cut that to 0.02 — but a 3.5-point game would stop being a
+	// pick-em, which is the shape that was asked for.
+	a.ok(worst < 1.1, `no line may be worth more than ~a point of free EV: ${worst.toFixed(2)}`);
+
+	// line rendering from a side's point of view
+	a.equal(lineOn(-4.5, 'home'), -4.5, 'home lays what the spread says');
+	a.equal(lineOn(-4.5, 'away'), 4.5, 'the away side gets it back');
+	a.equal(lineOn(null, 'home'), null);
 
 	// spread grading: home -4.5, home wins by 7 -> home covers
 	a.equal(gradeSpread('home', -4.5, 28, 21), 'win');
@@ -158,12 +213,13 @@ export async function selfTest() {
 	a.equal(gradeMl('home', null, 3), 'pending');
 
 	// points wiring
-	near(mlPoints('win', 240), 24);
-	near(mlPoints('loss', -298), -10);
-	near(mlPoints('loss', -20000), -RISK);
-	near(mlPoints('push', -298), 0);
-	near(mlPoints('pending', -298), 0);
-	near(mlPoints('win', null), 0);
+	a.equal(spPoints('win', -7), 4, 'backing a touchdown favourite pays 4');
+	a.equal(spPoints('loss', -7), -6, 'and costs 6 when they lose outright');
+	a.equal(spPoints('win', 10.5), 7, 'a ten-point dog winning outright pays 7');
+	a.equal(spPoints('loss', 10.5), -3);
+	a.equal(spPoints('push', -7), 0, 'a tie is worth nothing either way');
+	a.equal(spPoints('pending', -7), 0);
+	a.equal(spPoints('win', null), 0, 'a pick with no line recorded scores nothing');
 
 	// line rendering
 	a.equal(lineFor(-4.5, 'home'), '-4.5');

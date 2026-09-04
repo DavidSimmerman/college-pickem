@@ -1,6 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import { one, run } from '$lib/server/db';
-import { mlDead } from '$lib/scoring';
+import { spDead, lineOn } from '$lib/scoring';
 import type { RequestHandler } from './$types';
 
 /** Toggle a single pick. Locks are enforced here, never trusted from the client. */
@@ -19,11 +19,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	if (!g) error(404, 'no such game');
 	if (g.state !== 'pre' || g.started) error(409, 'game has started');
 
-	const price = kind === 'ml' ? (side === 'home' ? g.ml_home : g.ml_away) : g.spread;
-	if (side !== null && price === null) error(409, 'no line posted yet');
-	// A side that pays nothing for a correct pick is pure downside; the UI greys it out
-	// and the server refuses it, so a hand-rolled request cannot bank a free -RISK.
-	if (side !== null && kind === 'ml' && mlDead(price)) error(409, 'that side pays nothing');
+	if (side !== null && g.spread === null) error(409, 'no line posted yet');
+	// Both modes are priced off the spread now, so both need one. Backing a favourite
+	// this heavy is not a decision; the UI greys it out and the server refuses it, so a
+	// hand-rolled request cannot slip one through.
+	if (side !== null && kind === 'ml' && spDead(lineOn(g.spread, side))) error(409, 'that side is too heavy a favourite');
 
 	if (side === null) {
 		await run('DELETE FROM picks WHERE player_id = ? AND game_id = ? AND kind = ?',
@@ -39,7 +39,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
        odds_at = excluded.odds_at, created_at = now()`,
 		locals.player.id, gameId, kind, side,
 		g.spread,
-		kind === 'ml' ? price : null
+		kind === 'ml' ? (side === 'home' ? g.ml_home : g.ml_away) : null
 	);
 	return json({ ok: true, side });
 };

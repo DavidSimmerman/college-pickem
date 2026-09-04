@@ -1,6 +1,6 @@
 import { redirect } from '@sveltejs/kit';
 import { all, one } from '$lib/server/db';
-import { gradeSpread, gradeMl, mlPoints, type Side, type Outcome } from '$lib/scoring';
+import { gradeSpread, gradeMl, spPoints, lineOn, type Side, type Outcome } from '$lib/scoring';
 import { configured } from '$lib/server/google';
 import type { PageServerLoad } from './$types';
 
@@ -40,7 +40,7 @@ function tallies(rows: Row[], slateRows: SlateRow[]) {
 		} else {
 			const o = gradeMl(r.side, r.home_score, r.away_score);
 			record(ml, o);
-			ml.pts += mlPoints(o, r.odds_at);
+			ml.pts += spPoints(o, lineOn(r.spread_at, r.side));
 		}
 	}
 	for (const r of slateRows) {
@@ -98,6 +98,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 			: kind === 'spread'
 				? gradeSpread(side, (r as Row).spread_at ?? r.spread, r.home_score, r.away_score)
 				: gradeMl(side, r.home_score, r.away_score);
+		// Slate rows carry no locked line of their own, so they fall back to the game's.
+		const line = (r as Row).spread_at ?? r.spread;
 		return {
 			kind, seed, side,
 			start: r.start instanceof Date ? r.start.toISOString() : r.start,
@@ -106,10 +108,10 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 			abbr: side === 'home' ? r.home_abbr : r.away_abbr,
 			logo: side === 'home' ? r.home_logo : r.away_logo,
 			opp: side === 'home' ? r.away_abbr : r.home_abbr,
-			line: (r as Row).spread_at ?? r.spread,
+			line,
 			odds: r.odds_at,
 			outcome: o,
-			pts: kind === 'ml' ? mlPoints(o, r.odds_at) : null,
+			pts: kind === 'ml' ? spPoints(o, lineOn(line, side)) : null,
 			// Your team's score first: this page is about your pick, not about the venue.
 			score: graded
 				? side === 'home'

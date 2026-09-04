@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { lineFor, mlWin, mlLose, mlDead, fmtOdds, fmtPts, mlPoints, gradeSpread, gradeMl, type Side } from '$lib/scoring';
+	import { lineFor, lineOn, spWin, spLose, spDead, spPoints, fmtOdds, fmtPts, gradeSpread, gradeMl, type Side } from '$lib/scoring';
 	import { confRank } from '$lib/conferences';
 	import { slateScore } from '$lib/slate';
 	import { teamBg, inkOn, haloFilter, TINT } from '$lib/colors';
@@ -38,7 +38,10 @@
 		const next = g[key] === side ? null : side;
 		const prev = games;
 		const patch: any = { [key]: next };
-		if (mode === 'ml') patch.ml_odds_at = next ? (side === 'home' ? g.ml_home : g.ml_away) : null;
+		if (mode === 'ml') {
+			patch.ml_odds_at = next ? (side === 'home' ? g.ml_home : g.ml_away) : null;
+			patch.ml_spread_at = next ? g.spread : null;
+		}
 		games = games.map((x: any) => (x.id === g.id ? { ...x, ...patch } : x));
 		err = '';
 
@@ -186,7 +189,7 @@
 	 */
 	const deadSide = (g: any, side: Side) =>
 		mode === 'ml'
-			? mlDead(side === 'home' ? g.ml_home : g.ml_away)
+			? spDead(lineOn(g.spread, side))
 			: mode === 'spread'
 				? g.spread === null
 				: false;
@@ -204,7 +207,13 @@
 	);
 
 	const mlPicks = $derived(shown.filter((g: any) => g.ml_pick));
-	const upside = $derived(mlPicks.reduce((t: number, g: any) => t + mlWin(g.ml_odds_at ?? 0), 0));
+	const mlLine = (g: any, side: Side) => lineOn(g.ml_spread_at ?? g.spread, side);
+	const upside = $derived(
+		mlPicks.reduce((t: number, g: any) => t + spWin(mlLine(g, g.ml_pick) ?? 0), 0)
+	);
+	const downside = $derived(
+		mlPicks.reduce((t: number, g: any) => t + spLose(mlLine(g, g.ml_pick) ?? 0), 0)
+	);
 	const spreadCount = $derived(shown.filter((g: any) => g.spread_pick).length);
 
 	const outcome = (g: any) =>
@@ -254,7 +263,7 @@
 		{#if mode === 'ml' && mlPicks.length}
 			<p class="cond mt-1.5 flex justify-between text-[13px] tracking-wider" style="color:var(--dim)">
 				<span>ALL HIT <b style="color:var(--ok)">{fmtPts(upside)}</b></span>
-				<span>ALL MISS <b style="color:var(--bad)">{fmtPts(mlPicks.length * mlLose())}</b></span>
+				<span>ALL MISS <b style="color:var(--bad)">{fmtPts(downside)}</b></span>
 			</p>
 		{/if}
 		{#if mode === 'slate' && slate.frozen}
@@ -370,6 +379,10 @@
 								{@const odds = side === 'home' ? g.ml_home : g.ml_away}
 								{@const lockedAt = mode === 'slate' ? g.slate_odds_at : g.ml_odds_at}
 								{@const shownOdds = picked === side && lockedAt != null ? lockedAt : odds}
+								<!-- Moneyline is priced off the spread, so the number that matters is the
+								     line this side is getting — frozen at pick time, live otherwise. -->
+								{@const myLine = lineOn(
+									picked === side && g.ml_spread_at != null ? g.ml_spread_at : g.spread, side)}
 								{@const on = picked === side}
 								{@const fg = on ? inkOn(c) : '#e8eaf0'}
 								{@const dimmed = picked && !on}
@@ -414,16 +427,21 @@
 										<span class="cond block text-[13px] font-semibold" style="opacity:.6">
 											{priced != null ? fmtOdds(priced) : '—'}
 										</span>
-									{:else if odds !== null}
-										<span class="display mt-1.5 block text-[17px] leading-none">{fmtOdds(shownOdds)}</span>
+									{:else if myLine !== null}
+										<span class="display mt-1.5 block text-[17px] leading-none">
+											{(myLine > 0 ? '+' : '') + myLine}
+										</span>
 										{#if off}
-											<span class="cond block text-[13px] font-semibold" style="opacity:.7">PAYS NOTHING</span>
+											<span class="cond block text-[13px] font-semibold" style="opacity:.7">TOO HEAVY</span>
 										{:else}
 											<span class="cond block text-[13px] font-semibold">
-												<span style="color:{on ? fg : 'var(--ok)'}">{fmtPts(mlWin(shownOdds))}</span>
+												<span style="color:{on ? fg : 'var(--ok)'}">{fmtPts(spWin(myLine))}</span>
 												<span style="opacity:.45"> / </span>
-												<span style="color:{on ? fg : 'var(--bad)'}">{mlLose()}</span>
+												<span style="color:{on ? fg : 'var(--bad)'}">{spLose(myLine)}</span>
 											</span>
+										{/if}
+										{#if odds !== null}
+											<span class="cond block text-[12px]" style="opacity:.4">{fmtOdds(shownOdds)}</span>
 										{/if}
 									{:else}
 										<span class="cond mt-1.5 block text-[13px]" style="opacity:.5">NO LINE</span>
@@ -436,8 +454,8 @@
 									{#if res && res !== 'pending'}
 										<span class="display absolute right-0 top-0 px-1.5 py-0.5 text-[10px] leading-none"
 											style="background:{res === 'win' ? 'var(--ok)' : res === 'loss' ? 'var(--bad)' : '#6b7488'};color:#0b0d12">
-											{res === 'win' ? 'W' : res === 'loss' ? 'L' : 'PUSH'}{#if mode === 'ml' && lockedAt}
-												{fmtPts(mlPoints(res, lockedAt))}{/if}
+											{res === 'win' ? 'W' : res === 'loss' ? 'L' : 'PUSH'}{#if mode === 'ml' && myLine !== null}
+												{fmtPts(spPoints(res, myLine))}{/if}
 										</span>
 									{/if}
 								</button>

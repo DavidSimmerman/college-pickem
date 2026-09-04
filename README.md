@@ -7,7 +7,7 @@ independently, all off the same board.
 |---|---|---|
 | **Games of the Week** | The winner of ten curated games, straight up | Win / loss. No points. |
 | **Spreads** | A side against the line you locked in | Win / loss / push |
-| **Moneyline** | A side at the price you locked in | Points, scaled to the odds |
+| **Moneyline** | A winner outright, priced off the spread | Points, by how big the spread was |
 
 ## Games of the Week
 
@@ -27,21 +27,30 @@ started games grey out, and you can still submit the rest.
 
 ## Moneyline scoring
 
-A hit pays the odds; a miss always costs the same. Points are whole numbers.
+You pick a winner outright. The spread is only how the pick is priced: a coin-flip
+game is worth 5 and costs 5, and every 3.5 points of spread past the pick'em band
+moves one bucket.
 
-| You pick | If it hits | If it misses |
+| The line your team is getting | If they win | If they lose |
 |---|---|---|
-| `+350` underdog | **+35** | −10 |
-| `-110` coin flip | +9 | −10 |
-| `-400` favorite | +3 | −10 |
+| `+14` and up | **+9** | −1 |
+| `+10.5` | +7 | −3 |
+| `+7` | +6 | −4 |
+| `-3.5` to `+3.5` | +5 | −5 |
+| `-7` | +4 | −6 |
+| `-10.5` | +3 | −7 |
+| `-14` and worse | +1 | −9 |
 
-Heavy favorites are punished through the *ratio*, not the penalty: a `-400` favorite
-risks 10 points to win 3, so it has to hit 80% of the time just to break even. A side
-priced so short that a correct pick pays nothing is not offered at all — it greys out,
-and the server refuses it.
+A win and a miss always add up to 10. That is deliberate: risking the same amount
+whatever you back is the only shape where beating the market is the way to score,
+rather than one corner of the board paying for itself.
 
-Payouts cap at `MAX_WIN` so one lucky longshot cannot decide the season. Every constant
-lives in `src/lib/scoring.ts`, which also carries an assert-based self-test:
+Favorites of 21.5 or more are not offered at all — there is no decision in taking
+one. They grey out, and the server refuses them.
+
+Every constant lives in `src/lib/scoring.ts`, which carries an assert-based
+self-test covering the table, the flat stake, and the expected value of every line
+on the board:
 
 ```sh
 node --experimental-strip-types src/lib/scoring.ts

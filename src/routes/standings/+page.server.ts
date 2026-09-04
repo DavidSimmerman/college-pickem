@@ -1,6 +1,6 @@
 import { redirect } from '@sveltejs/kit';
 import { all } from '$lib/server/db';
-import { gradeSpread, gradeMl, mlPoints, type Side } from '$lib/scoring';
+import { gradeSpread, gradeMl, spPoints, lineOn, type Side } from '$lib/scoring';
 import type { PageServerLoad } from './$types';
 
 type Row = {
@@ -45,7 +45,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 			else if (o === 'push') e.t++;
 		} else {
 			const o = gradeMl(r.side, r.home_score, r.away_score);
-			const pts = mlPoints(o, r.odds_at);
+			const pts = spPoints(o, lineOn(r.spread_at, r.side));
 			e.ml += pts;
 			if (o === 'win') e.mlW++;
 			else if (o === 'loss') e.mlL++;

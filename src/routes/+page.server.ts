@@ -36,7 +36,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	const rows = await all<any>(
 		`SELECT g.*,
               (g.start <= now() OR g.state <> 'pre') AS locked,
-              sp.side AS spread_pick, ml.side AS ml_pick, ml.odds_at AS ml_odds_at, sp.spread_at,
+              sp.side AS spread_pick, ml.side AS ml_pick, ml.odds_at AS ml_odds_at,
+              sp.spread_at, ml.spread_at AS ml_spread_at,
               hlc.color AS home_logo_color, alc.color AS away_logo_color,
               hlc.halo_on AS home_halo_on, hlc.halo_off AS home_halo_off,
               alc.halo_on AS away_halo_on, alc.halo_off AS away_halo_off
