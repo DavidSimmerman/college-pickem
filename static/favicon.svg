@@ -1,9 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="CFB Pick'em">
   <rect width="64" height="64" fill="#ff4d1c"/>
-  <!-- Quadratic lens at roughly 1.7:1, a real football's proportion. The control
-       point is twice the height you want: 34 gives a 17-unit half-height. -->
+  <!-- Cubic with two symmetric control points, so length, height and tip sharpness
+       are three independent numbers. Half-height is 3/4 of the control height:
+       22.67 gives 17. Tuner: plan.simmerman.cc/m/pickem-icon -->
   <g transform="translate(32 32) rotate(-20)">
-    <path d="M-29 0 Q0 -34 29 0 Q0 34 -29 0 Z" fill="#0c0e14"/>
+    <path d="M-29 0 C-9.7 -22.67 9.7 -22.67 29 0 C9.7 22.67 -9.7 22.67 -29 0 Z" fill="#0c0e14"/>
     <g stroke="#ff4d1c" stroke-width="3.6" stroke-linecap="round">
       <path d="M-13 0 H13"/><path d="M-6 -5.2 V5.2"/><path d="M6 -5.2 V5.2"/>
     </g>

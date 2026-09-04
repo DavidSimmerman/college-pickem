@@ -2,7 +2,7 @@
   <rect width="64" height="64" fill="#ff4d1c"/>
   <!-- Same mark inside Android's central 80% safe zone. -->
   <g transform="translate(32 32) rotate(-20) scale(0.72)">
-    <path d="M-29 0 Q0 -34 29 0 Q0 34 -29 0 Z" fill="#0c0e14"/>
+    <path d="M-29 0 C-9.7 -22.67 9.7 -22.67 29 0 C9.7 22.67 -9.7 22.67 -29 0 Z" fill="#0c0e14"/>
     <g stroke="#ff4d1c" stroke-width="5" stroke-linecap="round">
       <path d="M-13 0 H13"/><path d="M-6 -5.2 V5.2"/><path d="M6 -5.2 V5.2"/>
     </g>
