@@ -3,7 +3,27 @@
 	import { page } from '$app/state';
 	let { children, data } = $props();
 	const nav = [['/', 'PICKS'], ['/me', 'MY PICKS'], ['/standings', 'STANDINGS']];
+
+	// Link previews want absolute URLs. page.url.origin is ORIGIN in production, which
+	// is already required for form posts to work — so there is nothing new to configure.
+	const blurb = 'Weekly college-football pick\'em. Ten curated Games of the Week, plus spreads and moneyline.';
+	const og = $derived(`${page.url.origin}/og.png?v=1`);
 </script>
+
+<svelte:head>
+	<meta name="description" content={blurb} />
+	<meta property="og:type" content="website" />
+	<meta property="og:site_name" content="CFB Pick'em" />
+	<meta property="og:title" content="CFB Pick'em" />
+	<meta property="og:description" content={blurb} />
+	<meta property="og:url" content={page.url.origin + page.url.pathname} />
+	<meta property="og:image" content={og} />
+	<meta property="og:image:width" content="1200" />
+	<meta property="og:image:height" content="630" />
+	<meta property="og:image:alt" content="CFB Pick'em — ten games a week." />
+	<meta name="twitter:card" content="summary_large_image" />
+	<meta name="twitter:image" content={og} />
+</svelte:head>
 
 <div class="min-h-screen antialiased">
 	{#if data.player}
