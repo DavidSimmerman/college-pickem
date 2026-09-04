@@ -251,7 +251,9 @@
 	<!-- mode: spreads, moneyline, or the weekly card -->
 	<div class="sticky top-0 z-30 -mx-3 mb-3 px-3 pb-2 pt-2 backdrop-blur-md" style="background:color-mix(in oklab, var(--bg) 88%, transparent)">
 		<div class="flex gap-[3px]">
-			{#each [['slate', 'GAMES OF THE WEEK', slate.frozen ? slate.filled : 0, '#f2c14e'], ['spread', 'SPREADS', spreadCount, 'var(--hot)'], ['ml', 'MONEYLINE', mlPicks.length, 'var(--led)']] as const as [m, label, n, hue]}
+			<!-- No count on the slate tab: "GAMES OF THE WEEK 9" reads as week nine. The
+			     progress bar directly below already says how many of them are picked. -->
+			{#each [['slate', 'GAMES OF THE WEEK', 0, '#f2c14e'], ['spread', 'SPREADS', spreadCount, 'var(--hot)'], ['ml', 'MONEYLINE', mlPicks.length, 'var(--led)']] as const as [m, label, n, hue]}
 				<button onclick={() => (mode = m)} aria-pressed={mode === m}
 					class="slant cond h-10 flex-1 border text-[13px] font-bold tracking-[0.12em] transition-colors"
 					style="border-color:{mode === m ? 'transparent' : 'var(--edge)'};
